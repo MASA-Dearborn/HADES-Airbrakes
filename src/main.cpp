@@ -12,6 +12,12 @@
 #include "sensors.h"
 
 
+
+
+
+float pressureToAlt(float p_hPa, float baseP_hPa);
+float basePressure_hPa;
+
 void setup()
 {
   // initialize LED digital pin as an output.
@@ -22,6 +28,7 @@ void setup()
 
   //initialize sensors
   sensorsInit();
+  basePressure_hPa = calibrateBaroBase();
 
 
 }
@@ -64,3 +71,6 @@ void loop()
   delay(1000);
 }
 
+float pressureToAlt(float p_hPa, float baseP_hPa){
+  return 44330.0f * (1.0f - powf(p_hPa / baseP_hPa, 0.1903f));
+}
