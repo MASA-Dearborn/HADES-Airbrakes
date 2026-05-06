@@ -1,28 +1,66 @@
-/**
- * Blink
- *
- * Turns on an LED on for one second,
- * then off for one second, repeatedly.
- */
 #include "Arduino.h"
+#include <Wire.h>
+
+#include <Adafruit_Sensor.h>
+#include "Adafruit_BMP5xx.h"
+#include "BMI088.h"
+#include <Adafruit_LIS2MDL.h>
+
+
+#include "config.h"
+#include "types.h"
+#include "sensors.h"
+
 
 void setup()
 {
   // initialize LED digital pin as an output.
   pinMode(LED_BUILTIN, OUTPUT);
+
+  Serial.begin(115200);
+  while (!Serial && millis() < 2000) {}
+
+  //initialize sensors
+  sensorsInit();
+
+
 }
 
 void loop()
 {
-  // turn the LED on (HIGH is the voltage level)
-  digitalWrite(LED_BUILTIN, HIGH);
+  SensorData data = {};
 
-  // wait for a second
-  delay(1000);
+  readIMU(data);
+  readBaro(data);
+  readMag(data);
+  // ================= PRINT =================
+  Serial.println("===== SENSOR DATA =====");
+  if (data.imuUpdated)
+  {
+    Serial.print("Accel (m/s^2): ");
+    Serial.print(data.ax); Serial.print(", ");
+    Serial.print(data.ay); Serial.print(", ");
+    Serial.println(data.az); Serial.println(data.imuTimeUs); 
 
-  // turn the LED off by making the voltage LOW
-  digitalWrite(LED_BUILTIN, LOW);
+    Serial.print("Gyro (rad/s): ");
+    Serial.print(data.gx); Serial.print(", ");
+    Serial.print(data.gy); Serial.print(", ");
+    Serial.println(data.gz); Serial.println(data.imuTimeUs); 
+}
+  if (data.magUpdated)
+  {
+    Serial.print("Mag (uT): ");
+    Serial.print(data.mx); Serial.print(", ");
+    Serial.print(data.my); Serial.print(", ");
+    Serial.println(data.mz); Serial.println(data.magTimeUs); 
+  }
 
-   // wait for a second
+  Serial.print("Pressure (hPa): ");
+  Serial.print(data.hpa);
+  Serial.print("  Temp (C): ");
+  Serial.println(data.tempC); Serial.println(data.baroTimeUs); 
+
+  Serial.println("=======================\n");
   delay(1000);
 }
+
