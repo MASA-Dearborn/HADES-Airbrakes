@@ -1,25 +1,21 @@
 #include "Arduino.h"
-#include <Wire.h>
-
-#include <Adafruit_Sensor.h>
-#include "Adafruit_BMP5xx.h"
-#include "BMI088.h"
-#include <Adafruit_LIS2MDL.h>
-
 
 #include "config.h"
 #include "types.h"
 #include "sensors.h"
+#include "estimation.h"
 
 
-
-
-
-float pressureToAlt(float p_hPa, float baseP_hPa);
 float basePressure_hPa;
+SensorData data = {};
+StateEstimate state = {};
+AttitudeEstimation madgwick;
+VerticalKalman kalman;
+Estimator estimator;
 
 void setup()
 {
+
   // initialize LED digital pin as an output.
   pinMode(LED_BUILTIN, OUTPUT);
 
@@ -29,48 +25,90 @@ void setup()
   //initialize sensors
   sensorsInit();
   basePressure_hPa = calibrateBaroBase();
+  Serial.print("Base pressure: ");
+  Serial.println(basePressure_hPa);
+
+  //initialize filters
+  estimator.begin(basePressure_hPa);
+
+  // madgwick.begin();
+  // kalman.begin(0.0f, 0.0f);
 
 
 }
 
 void loop()
 {
-  SensorData data = {};
+  // static uint32_t lastImuTimeUs = 0; //defined in Estimator
 
   readIMU(data);
   readBaro(data);
   readMag(data);
-  // ================= PRINT =================
-  Serial.println("===== SENSOR DATA =====");
-  if (data.imuUpdated)
-  {
-    Serial.print("Accel (m/s^2): ");
-    Serial.print(data.ax); Serial.print(", ");
-    Serial.print(data.ay); Serial.print(", ");
-    Serial.println(data.az); Serial.println(data.imuTimeUs); 
 
-    Serial.print("Gyro (rad/s): ");
-    Serial.print(data.gx); Serial.print(", ");
-    Serial.print(data.gy); Serial.print(", ");
-    Serial.println(data.gz); Serial.println(data.imuTimeUs); 
+  bool imuBefore  = data.imuUpdated;
+  bool baroBefore = data.baroUpdated;
+  bool magBefore  = data.magUpdated;  
+
+  estimator.update(data);  
+  state = estimator.getState();
+
+  
+  // --- IMU ---
+  Serial.print("IMU | Acc: ");
+  Serial.print(data.ax, 2); Serial.print(", ");
+  Serial.print(data.ay, 2); Serial.print(", ");
+  Serial.print(data.az, 2);
+
+  Serial.print(" | Gyro: ");
+  Serial.print(data.gx, 2); Serial.print(", ");
+  Serial.print(data.gy, 2); Serial.print(", ");
+  Serial.print(data.gz, 2);
+  Serial.println();
+
+  // --- Attitude ---
+  Serial.print("ATT | Quat: ");
+  Serial.print(state.attitude.q0, 4); Serial.print(", ");
+  Serial.print(state.attitude.q1, 4); Serial.print(", ");
+  Serial.print(state.attitude.q2, 4); Serial.print(", ");
+  Serial.print(state.attitude.q3, 4);
+  Serial.println();
+
+  // --- Barometer ---
+  Serial.print("BARO | P: ");
+  Serial.print(data.hpa, 2);
+  Serial.print(" hPa | T: ");
+  Serial.print(data.tempC, 2);
+  Serial.println(" C");
+
+  // --- Vertical state ---
+  Serial.print("VERT | h: ");
+  Serial.print(state.vertical.h, 2);
+  Serial.print(" m | v: ");
+  Serial.print(state.vertical.v, 2);
+  Serial.print(" m/s | a: ");
+  Serial.print(state.vertical.a, 2);
+  Serial.println(" m/s^2");
+
+  // --- Timestamp ---
+  Serial.print("TIME | ");
+  Serial.println(state.vertical.timeUs);
+
+  Serial.print("FLAGS | IMU ");
+  Serial.print(imuBefore);
+  Serial.print("->");
+  Serial.print(data.imuUpdated);
+
+  Serial.print(" | BARO ");
+  Serial.print(baroBefore);
+  Serial.print("->");
+  Serial.print(data.baroUpdated);
+
+  Serial.print(" | MAG ");
+  Serial.print(magBefore);
+  Serial.print("->");
+  Serial.println(data.magUpdated);
+
+  Serial.println("========================");
+  // delay(2000);
 }
-  if (data.magUpdated)
-  {
-    Serial.print("Mag (uT): ");
-    Serial.print(data.mx); Serial.print(", ");
-    Serial.print(data.my); Serial.print(", ");
-    Serial.println(data.mz); Serial.println(data.magTimeUs); 
-  }
 
-  Serial.print("Pressure (hPa): ");
-  Serial.print(data.hpa);
-  Serial.print("  Temp (C): ");
-  Serial.println(data.tempC); Serial.println(data.baroTimeUs); 
-
-  Serial.println("=======================\n");
-  delay(1000);
-}
-
-float pressureToAlt(float p_hPa, float baseP_hPa){
-  return 44330.0f * (1.0f - powf(p_hPa / baseP_hPa, 0.1903f));
-}

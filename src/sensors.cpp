@@ -4,7 +4,12 @@
 #include "Adafruit_BMP5xx.h"
 #include "BMI088.h"
 #include <Adafruit_LIS2MDL.h>
+#include "config.h"
 
+
+#if USE_SPI_SENSORS //change for spi later
+#else
+#endif
 Adafruit_BMP5xx bmp;
 Bmi088Accel accel(Wire, 0x18);
 Bmi088Gyro  gyro(Wire, 0x68);
@@ -34,6 +39,32 @@ void sensorsInit() {
   else
     Serial.println("Mag NOT found");
 }
+
+float calibrateBaroBase() {
+  float sum = 0.0f;
+  int count = 0;
+  SensorData temp = {};
+
+  for (int i = 0; i < BARO_CALIB_SAMPLES; i++) {
+    readBaro(temp);
+
+    if (temp.baroUpdated) {
+      sum += temp.hpa;
+      count++;
+    }
+
+    delay(20);
+  }
+
+  if (count == 0) {
+    Serial.println("Baro calibration failed, using sea level.");
+    return SEALEVEL_HPA;
+  }
+  Serial.println("Baro calibrated to local altitude");
+  return sum / count;
+}
+
+
 //might be useful to add safety conditionals
 
 void readIMU(SensorData& data){
