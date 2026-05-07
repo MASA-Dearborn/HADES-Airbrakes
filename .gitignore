@@ -1,1 +1,9 @@
 .pio
+.vscode/
+.DS_Store
+*.elf
+*.bin
+*.hex
+*.uf2
+.env
+secrets.h
