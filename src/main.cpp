@@ -5,13 +5,23 @@
 #include "sensors.h"
 #include "estimation.h"
 
+// enum class FlightState {
+//   PRELAUCH,
+//   BOOST,
+//   COAST,
+//   SAFETY,
+//   APOGEE,
+//   ABORT
+// };
 
 float basePressure_hPa;
 SensorData data = {};
 StateEstimate state = {};
-AttitudeEstimation madgwick;
-VerticalKalman kalman;
 Estimator estimator;
+
+// bool lauchDetected();
+
+
 
 void setup()
 {
@@ -30,10 +40,6 @@ void setup()
 
   //initialize filters
   estimator.begin(basePressure_hPa);
-
-  // madgwick.begin();
-  // kalman.begin(0.0f, 0.0f);
-
 
 }
 
@@ -70,7 +76,8 @@ void loop()
   Serial.print(state.attitude.q0, 4); Serial.print(", ");
   Serial.print(state.attitude.q1, 4); Serial.print(", ");
   Serial.print(state.attitude.q2, 4); Serial.print(", ");
-  Serial.print(state.attitude.q3, 4);
+  Serial.print(state.attitude.q3, 4); Serial.print(", ");
+  Serial.print(state.attitude.tiltDeg, 4); 
   Serial.println();
 
   // --- Barometer ---

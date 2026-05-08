@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include "estimation.h"
 #include "config.h"
 #include <math.h>
@@ -38,10 +39,14 @@ void Estimator::update(SensorData& data) {
                 ); // axis inverted for madgwick, might be better to change setup or function
                     //later add update magnetometer, no need for fusion in madwick
                 state.attitude = attitude.getState();
+                state.attitude.tiltDeg = computeTiltDeg(state.attitude);
 
                 // Project body-frame acceleration into world vertical axis,
                 // remove gravity, then use it for Kalman prediction.
                 float aVert = verticalAccel(data, state.attitude);
+
+                // if (fabsf(aVert) < 0.25f) aVert = 0.0f; // clear drift test, not sure if needed
+
                 kalman.predict(aVert, dt); // kalman prediction same rate as madg
 
                 verticalUpdated = true;
@@ -79,7 +84,6 @@ float pressureToAlt(float p_hPa, float baseP_hPa) {
     return 44330.0f * (1.0f - powf(p_hPa / baseP_hPa, 0.1903f));
 }
 
-
 // Rotate measured body-frame acceleration into world vertical direction.
 // Then subtract gravity effect so output is net vertical acceleration.
 //
@@ -102,4 +106,13 @@ float verticalAccel(const SensorData& data, const AttitudeState& q) {
         (q0*q0 - q1*q1 - q2*q2 + q3*q3) * az;
 
     return aWorldZ + GRAVITY;
+}
+// assuming q rotates body -> world and body z-axis is rocket vertical axis
+float computeTiltDeg(const AttitudeState& q){
+    float zw = 1.0f - 2.0f * (q.q1 * q.q1 + q.q2 * q.q2);
+
+    zw = constrain(zw, -1.0f, 1.0f);
+
+    return acosf(zw) * 180.0f / M_PI;
+
 }

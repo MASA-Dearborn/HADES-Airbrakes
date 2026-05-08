@@ -25,3 +25,4 @@ private:
 
 float pressureToAlt(float p_hPa, float baseP_hPa);
 float verticalAccel(const SensorData& data, const AttitudeState& q);
+float computeTiltDeg(const AttitudeState& q);

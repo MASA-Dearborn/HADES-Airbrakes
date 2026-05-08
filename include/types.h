@@ -18,19 +18,15 @@ struct SensorData{
 };
 
 struct VerticalState {
-    float h;
-    float v;
-    float a;
+    float h, v, a;
     uint32_t timeUs;
 };
 
 struct AttitudeState {
     
-    float q0;
-    float q1;
-    float q2;
-    float q3;
-  
+    float q0, q1, q2, q3;
+    float tiltDeg;
+
     uint32_t timeUs;
 };
 
