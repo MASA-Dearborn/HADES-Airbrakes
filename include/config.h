@@ -102,13 +102,13 @@
 // State Machine
 #define SM_LAUNCH_ACCEL_THRESHOLD_MS2  30.0f     // net vertical accel to confirm launch (~3 g above gravity)
 #define SM_LAUNCH_CONFIRM_COUNT        5          // consecutive IMU samples required to latch launch
-#define SM_COAST_DELAY_US              5000000UL  // time after launch before entering COASTING (5 s)
+#define SM_COAST_DELAY_US              4400000UL  // time after launch before entering COASTING (4.52 s)
 #define SM_TILT_LOCK_DEG               30.0f      // max tilt angle for airbrake deployment
 
 // Guidance — rocket physical properties (must be set before flight)
-#define ROCKET_MASS_KG         5.0f      // kg  — post-burnout dry mass
-#define ROCKET_REF_AREA_M2     0.00442f  // m²  — body cross-section (75 mm diameter)
-#define ROCKET_TARGET_APOGEE_M 1000.0f  // m   — AGL target apogee
+#define ROCKET_MASS_KG         33.135f      // kg  — post-burnout dry mass
+#define ROCKET_REF_AREA_M2     0.01928f  // m²  — body cross-section (15.67 cm diameter)
+#define ROCKET_TARGET_APOGEE_M 3048.0f  // m   — AGL target apogee
 
 // Guidance P gain: opening_fraction = Kp * (predicted_apogee - target_apogee)
 // At Kp = 0.02: 50 m overshoot -> full extension.  Tune on bench/sim first.

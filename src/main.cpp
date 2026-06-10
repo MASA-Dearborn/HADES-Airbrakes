@@ -7,7 +7,7 @@
 #include "guidance.h"
 #include "logging.h"
 
-// --- Module-level state -----------------------------------------------
+//  Module-level state
 
 static float         basePressure_hPa;
 static SensorData    data          = {};
@@ -20,7 +20,7 @@ static Guidance      guidance;
 static FlightPhase   phase     = FlightPhase::IDLE;
 static FlightPhase   prevPhase = FlightPhase::IDLE;
 
-// --- Task timestamps --------------------------------------------------
+// Task timestamps
 // Each task fires when (uint32_t)(micros() - lastXUs) >= its period.
 // Always increment by the fixed period (never reassign to now)
 // so drift does not accumulate over time.
@@ -33,11 +33,19 @@ static uint32_t lastOuterUs = 0;
 static uint32_t lastLogUs   = 0;
 static uint32_t lastPrintUs = 0;
 
-// --- Forward declarations ---------------------------------------------
-
 static void printDebug();
 
-// --- Setup ------------------------------------------------------------
+
+    static uint32_t imuCount = 0;
+    static uint32_t baroCount = 0;
+    static uint32_t magCount = 0;
+    static uint32_t innerCount = 0;
+    static uint32_t outerCount = 0;
+    static uint32_t logCount = 0;
+
+    static uint32_t lastRatePrintMs = 0;
+
+// Setup 
 
 void setup() {
     pinMode(LED_BUILTIN, OUTPUT);
@@ -58,15 +66,16 @@ void setup() {
     // actuatorInit();
     // actuatorHome();
 
-    // Stagger first-fire times so no two tasks coincide in the first loop pass
-    uint32_t now = micros();
-    lastImuUs    = now;
-    lastBaroUs   = now + 3000;
-    lastMagUs    = now + 1000;
-    lastInnerUs  = now +  500;
-    lastOuterUs  = now + 7000;
-    lastLogUs    = now + 11000;
-    lastPrintUs  = now + 15000;
+    // // Stagger first-fire times so no two tasks coincide in the first loop pass
+    // uint32_t now = micros();
+    // lastImuUs    = now;
+    // lastBaroUs   = now + 3000;
+    // lastMagUs    = now + 1000;
+    // lastInnerUs  = now +  500;
+    // lastOuterUs  = now + 7000;
+    // lastLogUs    = now + 11000;
+    // lastPrintUs  = now + 15000;
+
 }
 
 // --- Loop -------------------------------------------------------------
@@ -82,6 +91,8 @@ void loop() {
         readIMU(data);
         estimator.update(data);
         state = estimator.getState();
+        imuCount++;
+        
     }
 
     // 50 Hz — barometer read, Kalman correction
@@ -92,14 +103,17 @@ void loop() {
         readBaro(data);
         estimator.update(data);
         state = estimator.getState();
+        baroCount++;
     }
 
-    // 100 Hz — magnetometer read (logged only; no fusion until mag calibration added)
+    // 100 Hz — magnetometer read (logged only)
     if ((uint32_t)(now - lastMagUs) >= MAG_PERIOD_US) {
         lastMagUs += MAG_PERIOD_US;
 
         data.magUpdated = false;
         readMag(data);
+        magCount++;
+        
     }
 
     // 100 Hz — inner control: actuator position PID
@@ -109,6 +123,7 @@ void loop() {
         actuatorUpdatePID();
 
         // if (!digitalRead(ACTUATOR_FAULT_PIN)) sm.triggerFault();
+        innerCount++;
     }
 
     // 20 Hz — outer control: state machine + guidance + actuator enable/disable
@@ -139,6 +154,8 @@ void loop() {
             // IDLE / LAUNCHED / DESCENT / FAULT: motor off
             actuatorSetEnabled(false);
         }
+
+        outerCount++;
     }
 
     // 50 Hz — SD logging
@@ -146,13 +163,28 @@ void loop() {
         lastLogUs += LOG_PERIOD_US;
 
         loggerWrite(state, data, guidanceState, phase, actuatorGetPositionCm());
+        logCount++;
     }
 
-    // 10 Hz — serial debug output
-    if ((uint32_t)(now - lastPrintUs) >= DEBUG_PRINT_PERIOD_US) {
-        lastPrintUs += DEBUG_PRINT_PERIOD_US;
-        printDebug();
-    }
+    // // 10 Hz — serial debug output, disable for flight
+    // if ((uint32_t)(now - lastPrintUs) >= DEBUG_PRINT_PERIOD_US) {
+    //     lastPrintUs += DEBUG_PRINT_PERIOD_US;
+    //     printDebug();
+    // }
+
+    // // Check loop rates
+    // if (millis() - lastRatePrintMs >= 1000) {
+    //     lastRatePrintMs += 1000;
+
+    //     Serial.print("Hz | IMU: "); Serial.print(imuCount);
+    //     Serial.print(" BARO: "); Serial.print(baroCount);
+    //     Serial.print(" MAG: "); Serial.print(magCount);
+    //     Serial.print(" INNER: "); Serial.print(innerCount);
+    //     Serial.print(" OUTER: "); Serial.print(outerCount);
+    //     Serial.print(" LOG: "); Serial.println(logCount);
+
+    //     imuCount = baroCount = magCount = innerCount = outerCount = logCount = 0;
+    // }
 }
 
 // --- Debug output (10 Hz, serial only) --------------------------------
