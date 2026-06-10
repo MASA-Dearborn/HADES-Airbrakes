@@ -30,7 +30,7 @@ void Estimator::update(SensorData& data) {
         {
             float dt = (data.imuTimeUs - lastImuTimeUs) * 1e-6f; //calculate dt
 
-            if (dt > 0.0f && dt < 0.1f) // do not update if f>10Hz IMU update (safety)
+            if (dt > 0.0f && dt < 0.1f) // reject stale or invalid dt (require 10 Hz < rate, i.e. dt < 100 ms)
             {
                 attitude.updateIMU(
                 data.gx, data.gy, data.gz,

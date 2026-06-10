@@ -11,7 +11,7 @@
 //Serial
 //Timing
 //I2C Addresses
-#define USE_SPI_SENSORS 1
+#define USE_SPI_SENSORS 0
 
 #define NRF_CE_PIN       4
 #define NRF_CS_PIN       6
@@ -87,4 +87,29 @@
 #define ACTUATOR_DUTY_MIN -100.0f
 
 
-//GUidance Limits
+// Task scheduling periods
+#define IMU_PERIOD_US           5000UL     // 200 Hz — Madgwick + Kalman predict
+#define BARO_PERIOD_US          20000UL    //  50 Hz — Kalman baro update
+#define MAG_PERIOD_US           10000UL    // 100 Hz — logged only, no fusion yet
+#define OUTER_CTRL_PERIOD_US    50000UL    //  20 Hz — state machine + guidance
+// ACTUATOR_CONTROL_PERIOD_US               100 Hz — inner PID (already defined above)
+#define LOG_PERIOD_US           20000UL    //  50 Hz — SD write
+#define DEBUG_PRINT_PERIOD_US   100000UL   //  10 Hz — serial output
+
+// SD logging
+#define LOG_PREALLOC_BYTES      (10UL * 1024UL * 1024UL)  // 10 MB pre-alloc to avoid mid-flight cluster delays
+
+// State Machine
+#define SM_LAUNCH_ACCEL_THRESHOLD_MS2  30.0f     // net vertical accel to confirm launch (~3 g above gravity)
+#define SM_LAUNCH_CONFIRM_COUNT        5          // consecutive IMU samples required to latch launch
+#define SM_COAST_DELAY_US              5000000UL  // time after launch before entering COASTING (5 s)
+#define SM_TILT_LOCK_DEG               30.0f      // max tilt angle for airbrake deployment
+
+// Guidance — rocket physical properties (must be set before flight)
+#define ROCKET_MASS_KG         5.0f      // kg  — post-burnout dry mass
+#define ROCKET_REF_AREA_M2     0.00442f  // m²  — body cross-section (75 mm diameter)
+#define ROCKET_TARGET_APOGEE_M 1000.0f  // m   — AGL target apogee
+
+// Guidance P gain: opening_fraction = Kp * (predicted_apogee - target_apogee)
+// At Kp = 0.02: 50 m overshoot -> full extension.  Tune on bench/sim first.
+#define GUIDANCE_KP            0.02f     // 1/m

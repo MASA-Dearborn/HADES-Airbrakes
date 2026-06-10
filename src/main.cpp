@@ -1,522 +1,195 @@
 #include "Arduino.h"
-
 #include "config.h"
-// #include "types.h"
 #include "sensors.h"
 #include "estimation.h"
+#include "actuator.h"
+#include "statemachine.h"
+#include "guidance.h"
+#include "logging.h"
 
+// --- Module-level state -----------------------------------------------
 
-float basePressure_hPa;
-SensorData data = {};
-StateEstimate state = {};
-Estimator estimator;
+static float         basePressure_hPa;
+static SensorData    data          = {};
+static StateEstimate state         = {};
+static GuidanceState guidanceState = {};
+static Estimator     estimator;
+static StateMachine  sm;
+static Guidance      guidance;
 
+static FlightPhase   phase     = FlightPhase::IDLE;
+static FlightPhase   prevPhase = FlightPhase::IDLE;
 
+// --- Task timestamps --------------------------------------------------
+// Each task fires when (uint32_t)(micros() - lastXUs) >= its period.
+// Always increment by the fixed period (never reassign to now)
+// so drift does not accumulate over time.
 
-volatile int lastEncoded = 0;
+static uint32_t lastImuUs   = 0;
+static uint32_t lastBaroUs  = 0;
+static uint32_t lastMagUs   = 0;
+static uint32_t lastInnerUs = 0;
+static uint32_t lastOuterUs = 0;
+static uint32_t lastLogUs   = 0;
+static uint32_t lastPrintUs = 0;
 
-float targetCm = 0.0f;
-int pwmCmd = 0;
+// --- Forward declarations ---------------------------------------------
 
+static void printDebug();
 
-volatile long positionCount = 0;
-volatile long transitionCount = 0;
+// --- Setup ------------------------------------------------------------
 
-float errorCm = 0.0f;
-float integral = 0.0f;
-float dutyPercent = 0.0f;
+void setup() {
+    pinMode(LED_BUILTIN, OUTPUT);
 
+    Serial.begin(115200);
+    while (!Serial && millis() < 2000) {}
 
-unsigned long lastControlUs = 0;
-unsigned long lastPrintMs = 0;
+    sensorsInit();
+    basePressure_hPa = calibrateBaroBase();
+    Serial.print("Base pressure: ");
+    Serial.println(basePressure_hPa);
 
-struct ControlCmd{
-    float targetCm; //target in cm
-    int pwmCmd; //actuator input
-    volatile float dutyPercent;
-    volatile float integral;
-    bool enableActuator;
-    uint32_t controlTimeUs;
+    estimator.begin(basePressure_hPa);
+    sm.begin();
+    guidance.begin();
+    loggerBegin();
 
-};
+    // actuatorInit();
+    // actuatorHome();
 
-struct ActuatorState {
-    float positionCm;
-    int lastEncoded;
-    volatile long positionCount;
-    volatile long transitionCount;
-    int motorDirection;
-    bool homed;
-    bool homingActive;
-    bool enableActuator;
-    uint32_t timeUs;
-};
-ActuatorState actuatorState={};
-ControlCmd controlCmd = {};
-
-
-
-
-void updateActuatorState(ActuatorState& actuatorState); 
-void hallISR() {
-  updateActuatorState(actuatorState); //ISR that calls an function with passable paramter
-}  
-long getPositionCount(const ActuatorState& actuatorState);
-long getTransitionCount(const ActuatorState& actuatorState);
-float getPositionCm(const ActuatorState& actuatorState);
-void zeroPosition(ActuatorState& actuatorState, ControlCmd& controlCmd );
-void setMotor(ControlCmd& controlCmd) ;
-void stopMotor(ControlCmd& controlCmd);
-void updateActuatorPID(ActuatorState& actuatorState, ControlCmd& controlCmd);
-float calibrateActuator(ActuatorState& actuatorState);
-void homeActuator(ActuatorState& actuatorState);
-int dutyToPWM(float duty);
-
-
-void setup()
-{
-
-  // initialize LED digital pin as an output.
-  pinMode(LED_BUILTIN, OUTPUT);
-
-  Serial.begin(115200);
-  while (!Serial && millis() < 2000) {}
-
-  //initialize sensors
-  sensorsInit();
-  basePressure_hPa = calibrateBaroBase();
-  Serial.print("Base pressure: ");
-  Serial.println(basePressure_hPa);
-
-  //initialize filters
-  estimator.begin(basePressure_hPa);
-
-  //initialize actuator sensor and calibration (home and calibration: count number of transitions until fully extended and return)
-
-  // pinMode(ACTUATOR_NSLEEP_PIN, OUTPUT);
-  // digitalWrite(ACTUATOR_NSLEEP_PIN, HIGH);
-  // delay(5);
-
-  // pinMode(ACTUATOR_IN1_PIN, OUTPUT);
-  // pinMode(ACTUATOR_IN2_PIN, OUTPUT);
-
-  // analogWriteFrequency(ACTUATOR_IN1_PIN, ACTUATOR_PWM_FREQ_HZ);
-  // analogWriteFrequency(ACTUATOR_IN2_PIN, ACTUATOR_PWM_FREQ_HZ);
-
-  // stopMotor(controlCmd);
-
-  // pinMode(ACTUATOR_FAULT_PIN, INPUT_PULLUP);
-
-  // pinMode(HALL_A_PIN, INPUT_PULLUP);
-  // pinMode(HALL_B_PIN, INPUT_PULLUP);
-
-  // int a = digitalRead(HALL_A_PIN);
-  // int b = digitalRead(HALL_B_PIN);
-
-  // actuatorState.lastEncoded = (a << 1) | b;
-
-  // attachInterrupt(digitalPinToInterrupt(HALL_A_PIN), hallISR, CHANGE);
-  // attachInterrupt(digitalPinToInterrupt(HALL_B_PIN), hallISR, CHANGE);
-
-  // zeroPosition(actuatorState, controlCmd);
-
-  // lastControlUs = micros();
-  // lastPrintMs = millis();
-
-
-
+    // Stagger first-fire times so no two tasks coincide in the first loop pass
+    uint32_t now = micros();
+    lastImuUs    = now;
+    lastBaroUs   = now + 3000;
+    lastMagUs    = now + 1000;
+    lastInnerUs  = now +  500;
+    lastOuterUs  = now + 7000;
+    lastLogUs    = now + 11000;
+    lastPrintUs  = now + 15000;
 }
 
-void printActuatorDebug(
-  const ActuatorState& actuatorState,
-  const ControlCmd& controlCmd,
-  float targetCm,
-  float errorCm
-) {
-  static uint32_t lastPrintMs = 0;
-  uint32_t nowMs = millis();
+// --- Loop -------------------------------------------------------------
 
-  if (nowMs - lastPrintMs < 200) {
-    return;
-  }
-  lastPrintMs = nowMs;
+void loop() {
+    uint32_t now = micros();
 
-  int hallA = digitalRead(HALL_A_PIN);
-  int hallB = digitalRead(HALL_B_PIN);
-  int fault = digitalRead(ACTUATOR_FAULT_PIN);
+    // 200 Hz — IMU read, Madgwick attitude update, Kalman predict
+    if ((uint32_t)(now - lastImuUs) >= IMU_PERIOD_US) {
+        lastImuUs += IMU_PERIOD_US;
 
-  long posCount = getPositionCount(actuatorState);
-  long transCount = getTransitionCount(actuatorState);
-  float posCm = getPositionCm(actuatorState);
+        data.imuUpdated = false;
+        readIMU(data);
+        estimator.update(data);
+        state = estimator.getState();
+    }
 
-  Serial.print("ACT | H1:");
-  Serial.print(hallA);
+    // 50 Hz — barometer read, Kalman correction
+    if ((uint32_t)(now - lastBaroUs) >= BARO_PERIOD_US) {
+        lastBaroUs += BARO_PERIOD_US;
 
-  Serial.print(" H2:");
-  Serial.print(hallB);
+        data.baroUpdated = false;
+        readBaro(data);
+        estimator.update(data);
+        state = estimator.getState();
+    }
 
-  Serial.print(" FAULT:");
-  Serial.print(fault);  // usually 1 = OK, 0 = fault
+    // 100 Hz — magnetometer read (logged only; no fusion until mag calibration added)
+    if ((uint32_t)(now - lastMagUs) >= MAG_PERIOD_US) {
+        lastMagUs += MAG_PERIOD_US;
 
-  Serial.print(" | count:");
-  Serial.print(posCount);
+        data.magUpdated = false;
+        readMag(data);
+    }
 
-  Serial.print(" trans:");
-  Serial.print(transCount);
+    // 100 Hz — inner control: actuator position PID
+    if ((uint32_t)(now - lastInnerUs) >= ACTUATOR_CONTROL_PERIOD_US) {
+        lastInnerUs += ACTUATOR_CONTROL_PERIOD_US;
 
-  Serial.print(" pos:");
-  Serial.print(posCm, 4);
-  Serial.print(" cm");
+        actuatorUpdatePID();
 
-  Serial.print(" | pwm:");
-  Serial.print(controlCmd.pwmCmd);
+        // if (!digitalRead(ACTUATOR_FAULT_PIN)) sm.triggerFault();
+    }
 
-  Serial.print(" | duty:");
-  Serial.print(controlCmd.dutyPercent, 1);
+    // 20 Hz — outer control: state machine + guidance + actuator enable/disable
+    if ((uint32_t)(now - lastOuterUs) >= OUTER_CTRL_PERIOD_US) {
+        lastOuterUs += OUTER_CTRL_PERIOD_US;
 
-  Serial.print(" | enabled:");
-  Serial.print(actuatorState.enableActuator);
+        sm.update(state);
+        phase = sm.getPhase();
 
-  Serial.print(" | homed:");
-  Serial.print(actuatorState.homed);
+        // Flush SD on transition to a terminal state to protect data before landing
+        if (phase != prevPhase) {
+            if (phase == FlightPhase::DESCENT || phase == FlightPhase::FAULT) {
+                loggerFlush();
+            }
+            prevPhase = phase;
+        }
 
-  Serial.print(" | homing:");
-  Serial.println(actuatorState.homingActive);
+        if (sm.canDeployBrakes()) {
+            float opening = actuatorGetPositionCm() / ACTUATOR_MAX_POSITION_CM;
+            guidanceState = guidance.update(state, data, opening);
+            actuatorSetTarget(guidanceState.targetPositionCm);
+            actuatorSetEnabled(true);
+        } else if (phase == FlightPhase::COASTING || phase == FlightPhase::APOGEE) {
+            // Tilt lock or apogee: retract to zero
+            actuatorSetTarget(0.0f);
+            actuatorSetEnabled(true);
+        } else {
+            // IDLE / LAUNCHED / DESCENT / FAULT: motor off
+            actuatorSetEnabled(false);
+        }
+    }
+
+    // 50 Hz — SD logging
+    if ((uint32_t)(now - lastLogUs) >= LOG_PERIOD_US) {
+        lastLogUs += LOG_PERIOD_US;
+
+        loggerWrite(state, data, guidanceState, phase, actuatorGetPositionCm());
+    }
+
+    // 10 Hz — serial debug output
+    if ((uint32_t)(now - lastPrintUs) >= DEBUG_PRINT_PERIOD_US) {
+        lastPrintUs += DEBUG_PRINT_PERIOD_US;
+        printDebug();
+    }
 }
 
-// void loop() {
-//   actuatorState.enableActuator = true;
-
-//   Serial.println("Extend test");
-//   controlCmd.pwmCmd = -120;
-//   setMotor(controlCmd);
-
-//   for (int i = 0; i < 50; i++) {
-//     printActuatorDebug(actuatorState, controlCmd, 0.0f, 0.0f);
-//     delay(200);
-//   }
-
-//   Serial.println("Stop");
-//   stopMotor(controlCmd);
-//   delay(1000);
-
-//   Serial.println("Retract test");
-//   controlCmd.pwmCmd = 120;
-//   setMotor(controlCmd);
-
-//   for (int i = 0; i < 50; i++) {
-//     printActuatorDebug(actuatorState, controlCmd, 0.0f, 0.0f);
-//     delay(200);
-//   }
-
-//   Serial.println("Stop");
-//   stopMotor(controlCmd);
-//   delay(2000);
-// }
-
-void loop()
-{
-  data.imuUpdated = false;
-  data.baroUpdated = false;
-  data.magUpdated = false;
-
-  readIMU(data);
-  readBaro(data);
-  readMag(data);
-
-  bool imuBefore  = data.imuUpdated;
-  bool baroBefore = data.baroUpdated;
-  bool magBefore  = data.magUpdated;  
-
-  // estimator.update(data);  
-  // state = estimator.getState();
-
-
-  // unsigned long nowUs = micros();
-  // unsigned long nowMs = millis();
-
-  // // Simple actuator test
-  // if ((nowMs / 5000) % 2 == 0) {
-  //   targetCm = 5.0f;
-  // } else {
-  //   targetCm = 0.0f;
-  // }
-
-  // if (nowUs - lastControlUs >= ACTUATOR_CONTROL_PERIOD_US) {
-  //   lastControlUs += ACTUATOR_CONTROL_PERIOD_US;
-  //   controlCmd.targetCm = targetCm;
-  //   actuatorState.enableActuator = true;
-  //   updateActuatorPID(actuatorState, controlCmd);
-  // }
-
-  // --- IMU ---
-  Serial.print("IMU | Acc: ");
-  Serial.print(data.ax, 2); Serial.print(", ");
-  Serial.print(data.ay, 2); Serial.print(", ");
-  Serial.print(data.az, 2);
-
-  Serial.print(" | Gyro: ");
-  Serial.print(data.gx, 2); Serial.print(", ");
-  Serial.print(data.gy, 2); Serial.print(", ");
-  Serial.print(data.gz, 2);
-  Serial.println();
-
-  // --- Attitude ---
-  Serial.print("ATT | Quat: ");
-  Serial.print(state.attitude.q0, 4); Serial.print(", ");
-  Serial.print(state.attitude.q1, 4); Serial.print(", ");
-  Serial.print(state.attitude.q2, 4); Serial.print(", ");
-  Serial.print(state.attitude.q3, 4); Serial.print(", ");
-  Serial.print(state.attitude.tiltDeg, 4); 
-  Serial.println();
-
-  // --- Barometer ---
-  Serial.print("BARO | P: ");
-  Serial.print(data.hpa, 2);
-  Serial.print(" hPa | T: ");
-  Serial.print(data.tempC, 2);
-  Serial.println(" C");
-  // --- Magnetometer ---
-
-  Serial.print("MAG uT | ");
-  Serial.print(data.mx, 3); Serial.print(", ");
-  Serial.print(data.my, 3); Serial.print(", ");
-  Serial.println(data.mz, 3);
-  
-  // --- Vertical state ---
-  Serial.print("VERT | h: ");
-  Serial.print(state.vertical.h, 2);
-  Serial.print(" m | v: ");
-  Serial.print(state.vertical.v, 2);
-  Serial.print(" m/s | a: ");
-  Serial.print(state.vertical.a, 2);
-  Serial.println(" m/s^2");
-
-  // --- Timestamp ---
-  Serial.print("TIME | ");
-  Serial.println(state.vertical.timeUs);
-
-  Serial.print("FLAGS | IMU ");
-  Serial.print(imuBefore);
-  Serial.print("->");
-  Serial.print(data.imuUpdated);
-
-  Serial.print(" | BARO ");
-  Serial.print(baroBefore);
-  Serial.print("->");
-  Serial.print(data.baroUpdated);
-
-  Serial.print(" | MAG ");
-  Serial.print(magBefore);
-  Serial.print("->");
-  Serial.println(data.magUpdated);
-
-  // Serial.print("ACT | target: ");
-  // Serial.print(targetCm, 2);
-  // Serial.print(" cm | pos: ");
-  // Serial.print(getPositionCm(), 3);
-  // Serial.print(" cm | err: ");
-  // Serial.print(errorCm, 3);
-  // Serial.print(" | duty: ");
-  // Serial.print(dutyPercent, 1);
-  // Serial.print(" | pwm: ");
-  // Serial.print(pwmCmd);
-  // Serial.print(" | count: ");
-  // Serial.print(getPositionCount());
-  // Serial.print(" | transitions: ");
-  // Serial.println(getTransitionCount());
-
-  Serial.println("========================");
-  delay(2000);
-}
-
-
-void updateActuatorState(ActuatorState& actuatorState) {
-  //reentrant function cause it's inside ISR
-  //when either pin activates it'll read both pins
-  int a = digitalRead(HALL_A_PIN);
-  int b = digitalRead(HALL_B_PIN);
-  // previous|current
-  int encoded = (a << 1) | b; // := ab
-  int sum = (actuatorState.lastEncoded << 2) | encoded; //a'b'ab
-
-  // if  a transitions before b, foward 0b1101
-  if (sum == 0b0010 || sum == 0b1011 || sum == 0b1101 || sum == 0b0100)
-  {
-    actuatorState.positionCount++;
-    actuatorState.transitionCount++;
-  }
-  // reverse, reverse
-  else if (sum == 0b0001 || sum == 0b0111 || sum == 0b1110 || sum == 0b1000)
-  {
-    actuatorState.positionCount--;
-    actuatorState.transitionCount++;
-  }
-
-  actuatorState.lastEncoded = encoded;
-
-}
-
-long getPositionCount(const ActuatorState& actuatorState) {
-  long c;
-  noInterrupts();
-  c = actuatorState.positionCount;
-  interrupts();
-  return c;
-}
-
-long getTransitionCount(const ActuatorState& actuatorState) {
-  long c;
-  noInterrupts();
-  c = actuatorState.transitionCount;
-  interrupts();
-  return c;
-}
-
-float getPositionCm(const ActuatorState& actuatorState) {
-  return getPositionCount(actuatorState) * ACTUATOR_CM_PER_TRANSITION;
-}
-
-void zeroPosition(ActuatorState& actuatorState, ControlCmd& controlCmd ) {
-  noInterrupts();
-
-  actuatorState.positionCount = 0;
-  actuatorState.transitionCount = 0;
-
-  int a = digitalRead(HALL_A_PIN);
-  int b = digitalRead(HALL_B_PIN);
-  actuatorState.lastEncoded = (a << 1) | b;
-
-  interrupts();
-
-  controlCmd.integral = 0.0f;
-  controlCmd.dutyPercent = 0.0f;
-}
-
-//set motor movement stuff
-void updateActuatorPID(ActuatorState& actuatorState, ControlCmd& controlCmd) {
-  //check actuator enabled, if not block and not integrate
-  if (!actuatorState.enableActuator) {
-    stopMotor(controlCmd);
-    controlCmd.integral = 0.0f;
-    return;
-  } 
-
-  //constrain targetCM
-  targetCm = constrain(controlCmd.targetCm, ACTUATOR_MIN_POSITION_CM, ACTUATOR_MAX_POSITION_CM);
-
-  float actualCm = getPositionCm(actuatorState);
-  errorCm = targetCm - actualCm;
-  //calculate duty cycle
-  controlCmd.dutyPercent = ACTUATOR_KP * errorCm + ACTUATOR_KI * controlCmd.integral;
-
-  //ensure it's between bounds
-  int sat = constrain(controlCmd.dutyPercent, ACTUATOR_DUTY_MIN, ACTUATOR_DUTY_MAX);
-  //only integrate if error is not saturated, imagine increase aggresiveness if input is small
-  if (sat == controlCmd.dutyPercent)
-  {
-    controlCmd.integral += errorCm * ACTUATOR_CONTROL_DT_S;
-  }
-
-  //if smaller than required stop
-  if (fabsf(errorCm) < ACTUATOR_POSITION_TOLERANCE_CM) {
-    stopMotor(controlCmd);
-    controlCmd.integral = 0.0f;
-    return;
-  }
-
-  // convert to hardware specific command
-  controlCmd.pwmCmd = dutyToPWM(controlCmd.dutyPercent);
-  setMotor(controlCmd);
-}
-
-//check direction
-void setMotor(ControlCmd& controlCmd) {
-  int pwm = controlCmd.pwmCmd;
-  pwm = constrain(pwm, -ACTUATOR_PWM_MAX, ACTUATOR_PWM_MAX);
-  controlCmd.pwmCmd = pwm;
-
-  if (pwm > 0) {
-    analogWrite(ACTUATOR_IN1_PIN, pwm);
-    analogWrite(ACTUATOR_IN2_PIN, 0);
-  }
-  else if (pwm < 0) {
-    analogWrite(ACTUATOR_IN1_PIN, 0);
-    analogWrite(ACTUATOR_IN2_PIN, -pwm);
-  }
-  else {
-    analogWrite(ACTUATOR_IN1_PIN, 0);
-    analogWrite(ACTUATOR_IN2_PIN, 0);
-  }
-}
-
-void stopMotor(ControlCmd& controlCmd) {
-  controlCmd.pwmCmd = 0;
-  setMotor(controlCmd);
-  controlCmd.dutyPercent = 0.0f;
-}
-
-int dutyToPWM(float duty) {
-  if (fabsf(duty) < 1e-3f) return 0;
-
-  int pwm = map((int)fabsf(duty), 0, 100, 0, ACTUATOR_PWM_MAX);
-
-  if (duty > 0.0f && pwm < ACTUATOR_PWM_MIN_EXTEND) {
-    pwm = ACTUATOR_PWM_MIN_EXTEND;
-  }
-
-  if (duty < 0.0f && pwm < ACTUATOR_PWM_MIN_RETRACT) {
-    pwm = ACTUATOR_PWM_MIN_RETRACT;
-  }
-
-  return duty > 0.0f ? pwm : -pwm;
-}
-
-// write homing function 
-// struct ControlCmd{
-//     float targetCm; //target in cm
-//     int pwmCmd; //actuator input
-//     volatile float dutyPercent;
-//     volatile float integral;
-//     bool enableActuator;
-//     uint32_t controlTimeUs;
-
-// };
-
-// struct ActuatorState {
-//     float positionCm;
-//     int lastEncoded;
-//     volatile long positionCount;
-//     volatile long transitionCount;
-//     int motorDirection;
-//     bool homed;
-//     bool homingActive;
-//     bool enableActuator;
-//     uint32_t timeUs;
-// };
-
-
-void homeActuator(ActuatorState& actuatorState, ControlCmd& controlCmd){
-  //return to 0, detect 0 using timing and reset transition count
-  actuatorState.homingActive=true;
-  actuatorState.enableActuator=true;
-
-  uint32_t startTime = millis();
-  long lastCount = getPositionCount(actuatorState);
-  uint32_t lastMoveTime = millis();
-
-  controlCmd.pwmCmd = ACTUATOR_HOMING_PWM;
-  setMotor(controlCmd);
-
-  
-
-
-
-  
-
-}
-
-float calibrateActuator(ActuatorState& actuatorState){
-  //calculate the number of transitions for full extnt of lin actuator, only for prior calibration
-
+// --- Debug output (10 Hz, serial only) --------------------------------
+
+static void printDebug() {
+    Serial.print("PHASE: "); Serial.println(phaseName(phase));
+
+    Serial.print("IMU | Acc: ");
+    Serial.print(data.ax, 2); Serial.print(", ");
+    Serial.print(data.ay, 2); Serial.print(", ");
+    Serial.print(data.az, 2);
+    Serial.print(" | Gyro: ");
+    Serial.print(data.gx, 2); Serial.print(", ");
+    Serial.print(data.gy, 2); Serial.print(", ");
+    Serial.print(data.gz, 2);
+    Serial.println();
+
+    Serial.print("ATT | q: ");
+    Serial.print(state.attitude.q0, 3); Serial.print(", ");
+    Serial.print(state.attitude.q1, 3); Serial.print(", ");
+    Serial.print(state.attitude.q2, 3); Serial.print(", ");
+    Serial.print(state.attitude.q3, 3);
+    Serial.print(" | tilt: "); Serial.print(state.attitude.tiltDeg, 1); Serial.println(" deg");
+
+    Serial.print("BARO | ");
+    Serial.print(data.hpa, 2); Serial.print(" hPa  ");
+    Serial.print(data.tempC, 1); Serial.println(" C");
+
+    Serial.print("VERT | h: "); Serial.print(state.vertical.h, 1);
+    Serial.print(" m  v: ");    Serial.print(state.vertical.v, 1);
+    Serial.print(" m/s  a: ");  Serial.print(state.vertical.a, 1); Serial.println(" m/s^2");
+
+    Serial.print("GUID | est: "); Serial.print(guidanceState.estimatedApogeeM, 0);
+    Serial.print(" m  err: ");    Serial.print(guidanceState.apogeeErrorM, 0);
+    Serial.print(" m  tgt: ");    Serial.print(guidanceState.targetPositionCm, 1);
+    Serial.print(" cm  act: ");   Serial.print(actuatorGetPositionCm(), 1); Serial.println(" cm");
+
+    Serial.print("LOG | ready: "); Serial.println(loggerReady());
+    Serial.println("========================");
 }
