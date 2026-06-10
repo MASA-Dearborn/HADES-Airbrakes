@@ -47,11 +47,12 @@ pio run --target upload
 1. Sensor Interface [✓] 
     - TODO: add SPI support
 2. State Estimation [✓]
-3. State Machine
-4. Actuator Driver/Sensor
-5. Actuator Controller and Guidance Controller
+3. Actuator Driver/Sensor/Controller
+4. Guidance Controller (Simple one is tested, but need to add drag data)
+5. State Machine
 6. Safety & Inhibit Logic
-7. Logging & HIL Testing
+7. RF telemetry
+8. Logging & HIL Testing
 
 
 --------------------------------------------------

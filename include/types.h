@@ -37,10 +37,30 @@ struct StateEstimate {
 
 };
 
-struct ControlCmd{
-    float t_cm; //target in cm
-    float u; //actuator input
-    bool enableActuator;
-    uint32_t controlTimeUs;
+// struct ControlCmd{
+//     float targetCm; //target in cm
+//     float pwmCmd; //actuator input
+//     bool enableActuator;
+//     uint32_t controlTimeUs;
 
+// };
+
+// struct ActuatorState {
+//     float positionCm;
+//     long positionCount;
+//     long transitionCount;
+//     int motorDirection;
+//     bool homed;
+//     bool homingActive;
+//     uint32_t timeUs;
+// };
+
+struct GuidanceState {
+    float estimatedApogeeM;
+    float apogeeErrorM;
+    float targetPositionCm;
+    uint32_t timeUs;
 };
+
+
+
