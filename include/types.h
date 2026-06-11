@@ -53,5 +53,21 @@ struct GuidanceState {
     uint32_t timeUs;
 };
 
+struct ActuatorState {
+    int      lastEncoded;
+    volatile long positionCount;
+    volatile long transitionCount;
+    bool     homed;
+    bool     homingActive;
+    bool     enableActuator;
+};
+
+struct ControlCmd {
+    float    targetCm;
+    int      pwmCmd;
+    volatile float dutyPercent;
+    volatile float integral;
+};
+
 
 

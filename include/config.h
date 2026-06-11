@@ -65,7 +65,7 @@
 #define ACTUATOR_HOMING_TIMEOUT_MS 8000UL
 #define ACTUATOR_HOMING_STALL_TIME_MS 300UL
 
-#define ACTUATOR_HOMING_INTERVAL_MS 50000000UL
+#define ACTUATOR_HOMING_POLL_MS 10UL
 
 
 //Safety Limits
@@ -111,5 +111,5 @@
 #define ROCKET_TARGET_APOGEE_M 3048.0f  // m   — AGL target apogee
 
 // Guidance P gain: opening_fraction = Kp * (predicted_apogee - target_apogee)
-// At Kp = 0.02: 50 m overshoot -> full extension.  Tune on bench/sim first.
+// At Kp = 0.02: 50 m overshoot -> full extension.  Tune on bench first.
 #define GUIDANCE_KP            0.02f     // 1/m

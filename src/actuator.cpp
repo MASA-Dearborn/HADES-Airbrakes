@@ -2,24 +2,8 @@
 #include "config.h"
 #include <Arduino.h>
 #include <math.h>
+#include "types.h"
 
-// --- File-scope state -------------------------------------------------
-
-struct ActuatorState {
-    int      lastEncoded;
-    volatile long positionCount;
-    volatile long transitionCount;
-    bool     homed;
-    bool     homingActive;
-    bool     enableActuator;
-};
-
-struct ControlCmd {
-    float    targetCm;
-    int      pwmCmd;
-    volatile float dutyPercent;
-    volatile float integral;
-};
 
 static ActuatorState s_act = {};
 static ControlCmd    s_cmd = {};
@@ -177,15 +161,33 @@ void actuatorHome() {
     s_act.homingActive   = true;
     s_act.enableActuator = true;
 
-    long     lastCount    = readPositionCount();
-    uint32_t lastMoveTime = millis();
+    uint32_t startTime  = millis();
+    long     lastCount  = readPositionCount();
+    uint32_t lastMoveMs = startTime;
 
-    applyMotor(ACTUATOR_HOMING_PWM);
+    applyMotor(ACTUATOR_HOMING_PWM);  // retract toward hard stop
 
-    // TODO: complete stall detection loop
-    // Poll every ~10 ms; when readPositionCount() stops changing for
-    // ACTUATOR_HOMING_STALL_TIME_MS, call zeroPosition() + set homed = true.
-    // Abort and stopMotor() if millis() - startTime > ACTUATOR_HOMING_TIMEOUT_MS.
+    while (true) {
+        delay(ACTUATOR_HOMING_POLL_MS);
+
+        if ((uint32_t)(millis() - startTime) > ACTUATOR_HOMING_TIMEOUT_MS) {
+            stopMotor();
+            s_act.homingActive = false;
+            return;
+        }
+
+        long count = readPositionCount();
+        if (count != lastCount) {
+            lastCount  = count;
+            lastMoveMs = millis();
+        } else if ((uint32_t)(millis() - lastMoveMs) >= ACTUATOR_HOMING_STALL_TIME_MS) {
+            stopMotor();
+            zeroPosition();
+            s_act.homed        = true;
+            s_act.homingActive = false;
+            return;
+        }
+    }
 }
 
 void actuatorPrintDebug() {

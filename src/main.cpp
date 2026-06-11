@@ -63,8 +63,9 @@ void setup() {
     guidance.begin();
     loggerBegin();
 
-    // actuatorInit();
-    // actuatorHome();
+    actuatorInit();
+    actuatorHome();
+    Serial.print("ACT homed: "); Serial.println(actuatorIsHomed());
 
     // // Stagger first-fire times so no two tasks coincide in the first loop pass
     // uint32_t now = micros();
