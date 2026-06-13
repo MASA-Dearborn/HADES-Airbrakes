@@ -1,5 +1,6 @@
 #include "statemachine.h"
 #include "config.h"
+#include "hil.h"
 #include <Arduino.h>
 
 void StateMachine::begin() {
@@ -20,7 +21,7 @@ void StateMachine::update(const StateEstimate& state) {
             if (state.vertical.a >= SM_LAUNCH_ACCEL_THRESHOLD_MS2) {
                 if (++confirmCount >= SM_LAUNCH_CONFIRM_COUNT) {
                     phase        = FlightPhase::LAUNCHED;
-                    launchTimeUs = micros();
+                    launchTimeUs = timeNowUs();
                     confirmCount = 0;
                 }
             } else {
@@ -31,7 +32,7 @@ void StateMachine::update(const StateEstimate& state) {
         case FlightPhase::LAUNCHED:
             // Motor burnout is not directly observable, so coast phase begins
             // at a fixed time after launch to guarantee brakes only deploy post-burn
-            if ((uint32_t)(micros() - launchTimeUs) >= SM_COAST_DELAY_US) {
+            if ((uint32_t)(timeNowUs() - launchTimeUs) >= SM_COAST_DELAY_US) {
                 phase = FlightPhase::COASTING;
             }
             break;

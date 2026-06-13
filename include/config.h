@@ -28,14 +28,14 @@
 #define SPI_SCK_PIN      13
 
 //Actuator Pins
-#define ACTUATOR_NSLEEP_PIN 35
+//#define ACTUATOR_NSLEEP_PIN 35 not implemented
 #define ACTUATOR_IN1_PIN    36
 #define ACTUATOR_IN2_PIN    37
 
 #define HALL_A_PIN 23
 #define HALL_B_PIN 22
 
-#define ACTUATOR_FAULT_PIN 14
+//#define ACTUATOR_FAULT_PIN 14 not implemented
 
 //PWM Settings
 
@@ -92,6 +92,7 @@
 #define BARO_PERIOD_US          20000UL    //  50 Hz — Kalman baro update
 #define MAG_PERIOD_US           10000UL    // 100 Hz — logged only, no fusion yet
 #define OUTER_CTRL_PERIOD_US    50000UL    //  20 Hz — state machine + guidance
+
 // ACTUATOR_CONTROL_PERIOD_US               100 Hz — inner PID (already defined above)
 #define LOG_PERIOD_US           20000UL    //  50 Hz — SD write
 #define DEBUG_PRINT_PERIOD_US   100000UL   //  10 Hz — serial output
@@ -113,3 +114,9 @@
 // Guidance P gain: opening_fraction = Kp * (predicted_apogee - target_apogee)
 // At Kp = 0.02: 50 m overshoot -> full extension.  Tune on bench first.
 #define GUIDANCE_KP            0.02f     // 1/m
+
+// HIL actuator plant model (only used when built with -DHIL_MODE).
+// Match HIL_ACT_MAX_SPEED_CMS to the bench-measured no-load speed at
+// full PWM so closed-loop deployment timing is realistic.
+#define HIL_ACT_MAX_SPEED_CMS  4.0f      // cm/s at PWM 255
+#define HIL_ACT_START_POS_CM   2.0f      // physical position at boot, exercises homing

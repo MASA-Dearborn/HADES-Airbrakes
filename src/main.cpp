@@ -6,6 +6,7 @@
 #include "statemachine.h"
 #include "guidance.h"
 #include "logging.h"
+#include "hil.h"
 
 //  Module-level state
 
@@ -53,6 +54,10 @@ void setup() {
     Serial.begin(115200);
     while (!Serial && millis() < 2000) {}
 
+#ifdef HIL_MODE
+    hilInit();   // block until the host simulator sends INIT (pad atmosphere)
+#endif
+
     sensorsInit();
     basePressure_hPa = calibrateBaroBase();
     Serial.print("Base pressure: ");
@@ -67,22 +72,28 @@ void setup() {
     actuatorHome();
     Serial.print("ACT homed: "); Serial.println(actuatorIsHomed());
 
-    // // Stagger first-fire times so no two tasks coincide in the first loop pass
-    // uint32_t now = micros();
-    // lastImuUs    = now;
-    // lastBaroUs   = now + 3000;
-    // lastMagUs    = now + 1000;
-    // lastInnerUs  = now +  500;
-    // lastOuterUs  = now + 7000;
-    // lastLogUs    = now + 11000;
-    // lastPrintUs  = now + 15000;
+    // Stagger first-fire times so no two tasks coincide in the first loop pass.
+    uint32_t now = timeNowUs();
+    lastImuUs    = now;
+    lastBaroUs   = now + 3000;
+    lastMagUs    = now + 1000;
+    lastInnerUs  = now +  500;
+    lastOuterUs  = now + 7000;
+    lastLogUs    = now + 11000;
+    lastPrintUs  = now + 15000;
 
 }
 
 // --- Loop -------------------------------------------------------------
 
 void loop() {
-    uint32_t now = micros();
+#ifdef HIL_MODE
+    // Lock-step with the host: run one scheduler pass per SENSOR packet.
+    // timeNowUs() then returns the packet's simulation timestamp, so every
+    // task below fires on simulated time.
+    if (!hilPoll()) return;
+#endif
+    uint32_t now = timeNowUs();
 
     // 200 Hz — IMU read, Madgwick attitude update, Kalman predict
     if ((uint32_t)(now - lastImuUs) >= IMU_PERIOD_US) {
@@ -121,6 +132,9 @@ void loop() {
     if ((uint32_t)(now - lastInnerUs) >= ACTUATOR_CONTROL_PERIOD_US) {
         lastInnerUs += ACTUATOR_CONTROL_PERIOD_US;
 
+#if defined(HIL_MODE) && !defined(HIL_REAL_ACTUATOR)
+        actuatorHilStep(now);
+#endif
         actuatorUpdatePID();
 
         // if (!digitalRead(ACTUATOR_FAULT_PIN)) sm.triggerFault();
@@ -166,6 +180,13 @@ void loop() {
         loggerWrite(state, data, guidanceState, phase, actuatorGetPositionCm());
         logCount++;
     }
+
+#ifdef HIL_MODE
+    // Reply once per processed SENSOR packet; the host blocks on this.
+    hilSendStatus(state, guidanceState, phase, actuatorGetPositionCm(),
+                  estimator.getKalmanP00(), estimator.getKalmanP11(),
+                  actuatorGetDutyPercent());
+#endif
 
     // // 10 Hz — serial debug output, disable for flight
     // if ((uint32_t)(now - lastPrintUs) >= DEBUG_PRINT_PERIOD_US) {

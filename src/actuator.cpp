@@ -3,13 +3,57 @@
 #include <Arduino.h>
 #include <math.h>
 #include "types.h"
+#include "hil.h"
 
 
 static ActuatorState s_act = {};
 static ControlCmd    s_cmd = {};
 
+#if defined(HIL_MODE) && !defined(HIL_REAL_ACTUATOR)
+// --- HIL actuator plant -------------------------------------------------
+// First-order plant: position rate proportional to PWM command, hard stops
+// at 0 and full stroke.  Drives s_act.positionCount through the same encoder
+// counts the hardware would produce, so PID, homing stall detection and
+// actuatorGetPositionCm() are exercised unchanged.
+
+static float s_hilPosCm     = HIL_ACT_START_POS_CM;  // physical position
+static float s_hilZeroCm    = 0.0f;                  // physical pos at last encoder zero
+static uint32_t s_hilLastUs = 0;
+static bool     s_hilClockValid = false;
+
+static void hilPlantAdvance(float dtS) {
+    float v = (s_cmd.pwmCmd / (float)ACTUATOR_PWM_MAX) * HIL_ACT_MAX_SPEED_CMS;
+    s_hilPosCm += v * dtS;
+    if (s_hilPosCm < 0.0f)                     s_hilPosCm = 0.0f;
+    if (s_hilPosCm > ACTUATOR_FULL_STROKE_CM)  s_hilPosCm = ACTUATOR_FULL_STROKE_CM;
+
+    long count = lroundf((s_hilPosCm - s_hilZeroCm) / ACTUATOR_CM_PER_TRANSITION);
+    noInterrupts();
+    if (count != s_act.positionCount) s_act.transitionCount += labs(count - s_act.positionCount);
+    s_act.positionCount = count;
+    interrupts();
+}
+
+void actuatorHilStepDt(float dtS) {
+    hilPlantAdvance(dtS);
+}
+
+void actuatorHilStep(uint32_t simNowUs) {
+    if (!s_hilClockValid) {
+        s_hilLastUs     = simNowUs;
+        s_hilClockValid = true;
+        return;
+    }
+    uint32_t dtUs = simNowUs - s_hilLastUs;
+    s_hilLastUs   = simNowUs;
+    if (dtUs == 0 || dtUs > 1000000UL) return;  // skip stale or absurd steps
+    hilPlantAdvance(dtUs * 1e-6f);
+}
+#endif // HIL_MODE && !HIL_REAL_ACTUATOR
+
 // --- ISR + encoder ----------------------------------------------------
 
+#if !defined(HIL_MODE) || defined(HIL_REAL_ACTUATOR)
 static void updateState() {
     int a = digitalRead(HALL_A_PIN);
     int b = digitalRead(HALL_B_PIN);
@@ -27,6 +71,7 @@ static void updateState() {
 }
 
 static void hallISR() { updateState(); }
+#endif // !HIL_MODE || HIL_REAL_ACTUATOR
 
 static long readPositionCount() {
     long c;
@@ -49,6 +94,7 @@ static long readTransitionCount() {
 static void applyMotor(int pwm) {
     pwm = constrain(pwm, -ACTUATOR_PWM_MAX, ACTUATOR_PWM_MAX);
     s_cmd.pwmCmd = pwm;
+#if !defined(HIL_MODE) || defined(HIL_REAL_ACTUATOR)
     if (pwm > 0) {
         analogWrite(ACTUATOR_IN1_PIN, pwm);
         analogWrite(ACTUATOR_IN2_PIN, 0);
@@ -59,6 +105,7 @@ static void applyMotor(int pwm) {
         analogWrite(ACTUATOR_IN1_PIN, 0);
         analogWrite(ACTUATOR_IN2_PIN, 0);
     }
+#endif
 }
 
 static void stopMotor() {
@@ -81,7 +128,11 @@ static void zeroPosition() {
     noInterrupts();
     s_act.positionCount  = 0;
     s_act.transitionCount = 0;
+#if defined(HIL_MODE) && !defined(HIL_REAL_ACTUATOR)
+    s_hilZeroCm = s_hilPosCm;
+#else
     s_act.lastEncoded    = (digitalRead(HALL_A_PIN) << 1) | digitalRead(HALL_B_PIN);
+#endif
     interrupts();
     s_cmd.integral    = 0.0f;
     s_cmd.dutyPercent = 0.0f;
@@ -90,8 +141,9 @@ static void zeroPosition() {
 // --- Public API -------------------------------------------------------
 
 void actuatorInit() {
-    pinMode(ACTUATOR_NSLEEP_PIN, OUTPUT);
-    digitalWrite(ACTUATOR_NSLEEP_PIN, HIGH);
+#if !defined(HIL_MODE) || defined(HIL_REAL_ACTUATOR)
+    //pinMode(ACTUATOR_NSLEEP_PIN, OUTPUT);
+    //digitalWrite(ACTUATOR_NSLEEP_PIN, HIGH);
     delay(5);
 
     pinMode(ACTUATOR_IN1_PIN, OUTPUT);
@@ -100,7 +152,7 @@ void actuatorInit() {
     analogWriteFrequency(ACTUATOR_IN2_PIN, ACTUATOR_PWM_FREQ_HZ);
     stopMotor();
 
-    pinMode(ACTUATOR_FAULT_PIN, INPUT_PULLUP);
+    //pinMode(ACTUATOR_FAULT_PIN, INPUT_PULLUP);
     pinMode(HALL_A_PIN,         INPUT_PULLUP);
     pinMode(HALL_B_PIN,         INPUT_PULLUP);
 
@@ -108,6 +160,9 @@ void actuatorInit() {
 
     attachInterrupt(digitalPinToInterrupt(HALL_A_PIN), hallISR, CHANGE);
     attachInterrupt(digitalPinToInterrupt(HALL_B_PIN), hallISR, CHANGE);
+#else  // HIL_MODE && !HIL_REAL_ACTUATOR
+    stopMotor();
+#endif
 
     zeroPosition();
 }
@@ -153,6 +208,10 @@ float actuatorGetPositionCm() {
     return readPositionCount() * ACTUATOR_CM_PER_TRANSITION;
 }
 
+float actuatorGetDutyPercent() {
+    return s_cmd.dutyPercent;
+}
+
 bool actuatorIsHomed() {
     return s_act.homed;
 }
@@ -169,6 +228,10 @@ void actuatorHome() {
 
     while (true) {
         delay(ACTUATOR_HOMING_POLL_MS);
+
+#if defined(HIL_MODE) && !defined(HIL_REAL_ACTUATOR)
+        actuatorHilStepDt(ACTUATOR_HOMING_POLL_MS * 1e-3f);
+#endif
 
         if ((uint32_t)(millis() - startTime) > ACTUATOR_HOMING_TIMEOUT_MS) {
             stopMotor();
@@ -198,7 +261,7 @@ void actuatorPrintDebug() {
 
     Serial.print("ACT | H1:");   Serial.print(digitalRead(HALL_A_PIN));
     Serial.print(" H2:");        Serial.print(digitalRead(HALL_B_PIN));
-    Serial.print(" FAULT:");     Serial.print(digitalRead(ACTUATOR_FAULT_PIN));
+    //Serial.print(" FAULT:");     Serial.print(digitalRead(ACTUATOR_FAULT_PIN));
     Serial.print(" | count:");   Serial.print(readPositionCount());
     Serial.print(" trans:");     Serial.print(readTransitionCount());
     Serial.print(" pos:");       Serial.print(actuatorGetPositionCm(), 4);

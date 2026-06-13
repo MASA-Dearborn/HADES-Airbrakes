@@ -1,10 +1,33 @@
 #include "sensors.h"
+#include "config.h"
+
+#ifdef HIL_MODE
+// Virtual sensors: all readings come from host SENSOR packets (see hil.h).
+// Same API as the hardware drivers so the rest of the firmware is untouched.
+#include "hil.h"
+#include <Arduino.h>
+
+void sensorsInit() {
+  Serial.println("HIL: virtual sensors active");
+}
+
+// Base pressure comes from the host INIT packet (pad pressure), so the
+// altitude reference matches the simulated atmosphere exactly.
+float calibrateBaroBase() {
+  return hilBasePressureHpa();
+}
+
+void readIMU(SensorData& data)  { hilReadIMU(data); }
+void readBaro(SensorData& data) { hilReadBaro(data); }
+void readMag(SensorData& data)  { hilReadMag(data); }
+
+#else // hardware sensors
+
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include "Adafruit_BMP5xx.h"
 #include "BMI088.h"
 #include <Adafruit_LIS2MDL.h>
-#include "config.h"
 
 
 #if USE_SPI_SENSORS //change for spi later
@@ -167,5 +190,7 @@ void readMag(SensorData& data) {
     data.magUpdated = true;
   } 
   else data.magUpdated = false;
-  
+
 }
+
+#endif // HIL_MODE

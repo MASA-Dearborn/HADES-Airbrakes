@@ -1,5 +1,6 @@
 #include "attitude.h"
 #include "config.h"
+#include "hil.h"
 #include <Arduino.h>
 #include <math.h>
 
@@ -19,60 +20,49 @@ void AttitudeEstimation::updateIMU(float gx, float gy, float gz,
                                    float dt) {
     if (dt <= 0.0f) return;
     
-    // Normalize accelerometer measurement so it represents direction of gravity.
     float norm = sqrtf(ax * ax + ay * ay + az * az);
     if (norm < 1e-6f) return;
 
-    ax /= norm;
-    ay /= norm;
-    az /= norm;
+    // Skip accel correction when |a| is far from 1g — during high-thrust or
+    // free-fall phases the specific force departs from gravity and normalising
+    // it would steer the quaternion off (observed: 53° tilt error during boost).
+    bool accelValid = (norm > 0.5f * GRAVITY && norm < 1.5f * GRAVITY);
 
-    //Compute quaternion terms
+    float s0 = 0.0f, s1 = 0.0f, s2 = 0.0f, s3 = 0.0f;
 
-    float twoQ0 = 2.0f * q0;
-    float twoQ1 = 2.0f * q1;
-    float twoQ2 = 2.0f * q2;
-    float twoQ3 = 2.0f * q3;
-    float fourQ0 = 4.0f * q0;
-    float fourQ1 = 4.0f * q1;
-    float fourQ2 = 4.0f * q2;
-    float eightQ1 = 8.0f * q1;
-    float eightQ2 = 8.0f * q2;
-    float q0q0 = q0 * q0;
-    float q1q1 = q1 * q1;
-    float q2q2 = q2 * q2;
-    float q3q3 = q3 * q3;
+    if (accelValid) {
+        ax /= norm;
+        ay /= norm;
+        az /= norm;
 
-    // Gradient descent correction step: 
-    // f(q, a) is the error term: min ||f(q, a)^2||
-    // df = J^T(q_t-1)f(q_t-1, a_t)
+        float twoQ0 = 2.0f * q0;
+        float twoQ1 = 2.0f * q1;
+        float twoQ2 = 2.0f * q2;
+        float twoQ3 = 2.0f * q3;
+        float fourQ0 = 4.0f * q0;
+        float fourQ1 = 4.0f * q1;
+        float fourQ2 = 4.0f * q2;
+        float eightQ1 = 8.0f * q1;
+        float eightQ2 = 8.0f * q2;
+        float q0q0 = q0 * q0;
+        float q1q1 = q1 * q1;
+        float q2q2 = q2 * q2;
+        float q3q3 = q3 * q3;
 
-    float s0 = fourQ0 * q2q2 + twoQ2 * ax + fourQ0 * q1q1 - twoQ1 * ay;
+        s0 = fourQ0 * q2q2 + twoQ2 * ax + fourQ0 * q1q1 - twoQ1 * ay;
+        s1 = fourQ1 * q3q3 - twoQ3 * ax
+           + 4.0f * q0q0 * q1 - twoQ0 * ay
+           - fourQ1 + eightQ1 * q1q1 + eightQ1 * q2q2 + fourQ1 * az;
+        s2 = 4.0f * q0q0 * q2 + twoQ0 * ax
+           + fourQ2 * q3q3 - twoQ3 * ay
+           - fourQ2 + eightQ2 * q1q1 + eightQ2 * q2q2 + fourQ2 * az;
+        s3 = 4.0f * q1q1 * q3 - twoQ1 * ax
+           + 4.0f * q2q2 * q3 - twoQ2 * ay;
 
-    float s1 = fourQ1 * q3q3 - twoQ3 * ax
-            + 4.0f * q0q0 * q1 - twoQ0 * ay
-            - fourQ1
-            + eightQ1 * q1q1
-            + eightQ1 * q2q2
-            + fourQ1 * az;
-
-    float s2 = 4.0f * q0q0 * q2 + twoQ0 * ax
-            + fourQ2 * q3q3 - twoQ3 * ay
-            - fourQ2
-            + eightQ2 * q1q1
-            + eightQ2 * q2q2
-            + fourQ2 * az;
-
-    float s3 = 4.0f * q1q1 * q3 - twoQ1 * ax
-            + 4.0f * q2q2 * q3 - twoQ2 * ay;
-    
-    //Normalize for consistant beta gain
-    norm = sqrtf(s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3);
-    if (norm > 1e-6f) {
-        s0 /= norm;
-        s1 /= norm;
-        s2 /= norm;
-        s3 /= norm;
+        norm = sqrtf(s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3);
+        if (norm > 1e-6f) {
+            s0 /= norm; s1 /= norm; s2 /= norm; s3 /= norm;
+        }
     }
 
     // Quaternion derivative:
@@ -105,6 +95,6 @@ AttitudeState AttitudeEstimation::getState() const {
     out.q1 = q1;
     out.q2 = q2;
     out.q3 = q3;
-    out.timeUs = micros();
+    out.timeUs = timeNowUs();
     return out;
 }

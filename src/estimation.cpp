@@ -77,6 +77,9 @@ StateEstimate Estimator::getState() const {
     return state;
 }
 
+float Estimator::getKalmanP00() const { return kalman.getP00(); }
+float Estimator::getKalmanP11() const { return kalman.getP11(); }
+
 // Barometric altitude equation.
 // Computes altitude change relative to base pressure:
 //   h = 44330 * (1 - (P / P0)^0.1903)

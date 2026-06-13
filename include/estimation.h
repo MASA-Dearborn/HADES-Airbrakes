@@ -13,6 +13,8 @@ public:
   void begin(float basePressure_hPa);
   void update(SensorData& data);
   StateEstimate getState() const;
+  float getKalmanP00() const;
+  float getKalmanP11() const;
 
 private:
   AttitudeEstimation attitude;

@@ -1,5 +1,6 @@
 #include "kalman.h"
 #include "config.h"
+#include "hil.h"
 #include <Arduino.h>
 
 //Initialize state x = [h; v] and covariance P = I
@@ -82,6 +83,6 @@ VerticalState VerticalKalman::getState() const {
     out.h = h;
     out.v = v;
     out.a = a;
-    out.timeUs = micros();
+    out.timeUs = timeNowUs();
     return out;
 }

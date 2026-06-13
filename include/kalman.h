@@ -7,6 +7,8 @@ public:
   void predict(float aVert, float dt);
   void updateBaro(float hBaro);
   VerticalState getState() const;
+  float getP00() const { return P00; }
+  float getP11() const { return P11; }
 
 private:
   float h = 0.0f;
