@@ -188,25 +188,25 @@ void loop() {
                   actuatorGetDutyPercent());
 #endif
 
-    // // 10 Hz — serial debug output, disable for flight
-    // if ((uint32_t)(now - lastPrintUs) >= DEBUG_PRINT_PERIOD_US) {
-    //     lastPrintUs += DEBUG_PRINT_PERIOD_US;
-    //     printDebug();
-    // }
+    // 10 Hz — serial debug output, disable for flight
+    if ((uint32_t)(now - lastPrintUs) >= DEBUG_PRINT_PERIOD_US) {
+        lastPrintUs += DEBUG_PRINT_PERIOD_US;
+        printDebug();
+    }
 
-    // // Check loop rates
-    // if (millis() - lastRatePrintMs >= 1000) {
-    //     lastRatePrintMs += 1000;
+    // Check loop rates
+    if (millis() - lastRatePrintMs >= 1000) {
+        lastRatePrintMs += 1000;
 
-    //     Serial.print("Hz | IMU: "); Serial.print(imuCount);
-    //     Serial.print(" BARO: "); Serial.print(baroCount);
-    //     Serial.print(" MAG: "); Serial.print(magCount);
-    //     Serial.print(" INNER: "); Serial.print(innerCount);
-    //     Serial.print(" OUTER: "); Serial.print(outerCount);
-    //     Serial.print(" LOG: "); Serial.println(logCount);
+        Serial.print("Hz | IMU: "); Serial.print(imuCount);
+        Serial.print(" BARO: "); Serial.print(baroCount);
+        Serial.print(" MAG: "); Serial.print(magCount);
+        Serial.print(" INNER: "); Serial.print(innerCount);
+        Serial.print(" OUTER: "); Serial.print(outerCount);
+        Serial.print(" LOG: "); Serial.println(logCount);
 
-    //     imuCount = baroCount = magCount = innerCount = outerCount = logCount = 0;
-    // }
+        imuCount = baroCount = magCount = innerCount = outerCount = logCount = 0;
+    }
 }
 
 // --- Debug output (10 Hz, serial only) --------------------------------

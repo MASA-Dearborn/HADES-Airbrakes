@@ -28,14 +28,17 @@
 #define SPI_SCK_PIN      13
 
 //Actuator Pins
-//#define ACTUATOR_NSLEEP_PIN 35 not implemented
 #define ACTUATOR_IN1_PIN    36
 #define ACTUATOR_IN2_PIN    37
 
-#define HALL_A_PIN 23
-#define HALL_B_PIN 22
+#define HALL_A_PIN 34 //green
+#define HALL_B_PIN 35 ///yellow
+//blue vcc
+// orange gnd
+//black motor-
+//red motor+
 
-//#define ACTUATOR_FAULT_PIN 14 not implemented
+
 
 //PWM Settings
 
@@ -49,7 +52,7 @@
 #define ACTUATOR_RETRACT_SIGN -1
 
 //Actuator Settings
-#define ACTUATOR_FULL_STROKE_CM 10.0f //4.5? about
+#define ACTUATOR_FULL_STROKE_CM 5.0f //4.5? about
 #define ACTUATOR_TRANSITIONS_FULL_STROKE 4938.0f //should I make it changable because of environment 
 #define ACTUATOR_CM_PER_TRANSITION \
     (ACTUATOR_FULL_STROKE_CM / ACTUATOR_TRANSITIONS_FULL_STROKE)
@@ -60,9 +63,9 @@
 #define ACTUATOR_POSITION_TOLERANCE_CM 0.1f
 
 //Homing
-#define ACTUATOR_HOMING_PWM -255
+#define ACTUATOR_HOMING_PWM 255
 
-#define ACTUATOR_HOMING_TIMEOUT_MS 8000UL
+#define ACTUATOR_HOMING_TIMEOUT_MS 15000UL
 #define ACTUATOR_HOMING_STALL_TIME_MS 300UL
 
 #define ACTUATOR_HOMING_POLL_MS 10UL
@@ -92,8 +95,6 @@
 #define BARO_PERIOD_US          20000UL    //  50 Hz — Kalman baro update
 #define MAG_PERIOD_US           10000UL    // 100 Hz — logged only, no fusion yet
 #define OUTER_CTRL_PERIOD_US    50000UL    //  20 Hz — state machine + guidance
-
-// ACTUATOR_CONTROL_PERIOD_US               100 Hz — inner PID (already defined above)
 #define LOG_PERIOD_US           20000UL    //  50 Hz — SD write
 #define DEBUG_PRINT_PERIOD_US   100000UL   //  10 Hz — serial output
 

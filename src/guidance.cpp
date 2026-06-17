@@ -109,5 +109,7 @@ GuidanceState Guidance::update(const StateEstimate& state,
     targetOpening            = constrain(targetOpening, 0.0f, 1.0f);
     out.targetPositionCm     = targetOpening * ACTUATOR_MAX_POSITION_CM;
 
+    
+    
     return out;
 }

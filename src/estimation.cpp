@@ -11,6 +11,7 @@ void Estimator::begin(float basePressure) {
     kalman.begin(0.0f, 0.0f);
 
     lastImuTimeUs = 0;
+    Serial.println("Estimator initialized");
 }
 
 // Main estimator update.
