@@ -1,0 +1,8 @@
+rocketpy>=1.4
+pyserial>=3.5
+numpy
+matplotlib
+pytest
+
+# Only needed for Forecast/Ensemble (GFS/GEFS) atmospheres:
+# netCDF4

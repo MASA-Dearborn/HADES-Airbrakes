@@ -15,7 +15,7 @@ scheduler (`main.cpp`) on simulated or wall-clock time depending on build.
 - `guidance`   — energy-balance apogee predictor + CFD Cd table + P controller
 - `actuator`   — H-bridge + Hall-encoder linear actuator, homing, position PID
 - `logging`    — binary flight log to SD (`FLTxx.BIN`)
-- `hil`        — hardware-in-the-loop serial protocol (see HIL sim repo)
+- `hil`        — hardware-in-the-loop serial protocol used by `simulator/`
 - `types` / `config` — shared structs, constants, and tuning parameters
 
 --------------------------------------------------
@@ -35,28 +35,53 @@ commands brake opening proportional to the predicted overshoot.
 
 --------------------------------------------------
 
-## Build & Upload
+## Build and upload
 
-Install the PlatformIO CLI, then pick an environment (`platformio.ini`):
+PlatformIO builds the firmware and uploads it to the Teensy. The default build
+is `teensy41-hil`, which uses simulated sensors and a simulated actuator.
 
-```bash
-pio run -e teensy41              -t upload   # flight build (real sensors + actuator)
-pio run -e teensy41-hil          -t upload   # HIL: sensors + actuator simulated by host
-pio run -e teensy41-hil-act      -t upload   # HIL: virtual sensors, REAL motor + encoder
-pio test -e test-actuator --filter calibrate_actuator   # bench calibration (real motor)
+```powershell
+pio run                                      # build HIL firmware
+pio run -e teensy41-hil -t upload            # upload safe HIL firmware
+pio run -e teensy41 -t upload                # upload real flight firmware
+pio run -e teensy41-hil-act -t upload        # simulated sensors, real actuator
 ```
 
-The HIL builds pair with the Python simulator in `~/hades_airbrakes_control`
-(`HADES Airbrakes — Hardware-in-the-Loop Simulator`); in `HIL_MODE` all flight
-logic runs unmodified on the Teensy while sensors/actuator are driven over USB.
+Do not use a real-actuator build until the motor and encoder are wired and the
+mechanism is secured.
+
+## Python simulation testing
+
+The Python code in [`simulator/`](simulator/README.md) runs a RocketPy flight,
+sends simulated sensor readings to the Teensy, and uses the Teensy's reported
+brake position in the flight model.
+
+First-time setup:
+
+```powershell
+cd simulator
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+Close Serial Monitor, upload `teensy41-hil`, then run:
+
+```powershell
+python scripts/run_hil.py --port COM7 --no-real-time --with-reference
+```
+
+Results are saved under `simulator/results/`. The main values are achieved
+apogee, error from the 3048 m target, and maximum brake deployment.
 
 --------------------------------------------------
 
 ## Flight Readiness
 
-**Status: simulation-validated, NOT yet flight-cleared.** All four builds
-compile; the estimation/guidance/control logic is verified in HIL (apogee
-within ~1 m of target). The following must be closed before flight:
+**Status: not flight-cleared.** The firmware builds, the Python protocol tests
+pass, and the simulator communicates with the Teensy. The simulated actuator
+currently remains at zero deployment, so the HIL apogee result is not yet a
+valid control-system result. The following must be closed before flight:
 
 **Blocking — safety**
 - [ ] **Sensor-failure fail-safe + watchdog.** `readIMU()` does not yet flag a
@@ -109,7 +134,7 @@ within ~1 m of target). The following must be closed before flight:
 --------------------------------------------------
 ## Documentation:
 
-- HIL simulator + protocol: `~/hades_airbrakes_control/README.md`
+- HIL simulator + protocol: [`simulator/README.md`](simulator/README.md)
 - Wire protocol spec: `include/hil.h`
 
 --------------------------------------------------
