@@ -54,3 +54,14 @@ def lookup_cd(mach: float, opening: float) -> float:
 def rocketpy_drag_curve(deployment_level: float, mach: float) -> float:
     """Argument order expected by RocketPy AirBrakes (Deployment Level, Mach)."""
     return lookup_cd(mach, deployment_level)
+
+
+def closed_brakes_drag_curve(mach_max: float = 2.0, step: float = 0.01):
+    """Rocket power-off drag as (Mach, Cd) pairs: the table's 0-opening column.
+
+    RocketPy only evaluates the airbrakes curve when deployment_level > 0 and
+    otherwise falls back to the rocket's own power_off_drag.  Using the same
+    column here keeps Cd continuous at deployment 0.
+    """
+    n = int(round(mach_max / step))
+    return [(i * step, lookup_cd(i * step, 0.0)) for i in range(n + 1)]

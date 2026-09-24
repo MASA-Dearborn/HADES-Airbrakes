@@ -187,13 +187,14 @@ void actuatorUpdatePID() {
     float actual = actuatorGetPositionCm();
     float error  = target - actual;
 
-    s_cmd.dutyPercent = ACTUATOR_KP * error + ACTUATOR_KI * s_cmd.integral;
+    float duty = ACTUATOR_KP * error + ACTUATOR_KI * s_cmd.integral;
 
     // Anti-windup: only integrate when output is not saturated
-    float sat = constrain(s_cmd.dutyPercent, ACTUATOR_DUTY_MIN, ACTUATOR_DUTY_MAX);
-    if (sat == s_cmd.dutyPercent) {
+    float sat = constrain(duty, ACTUATOR_DUTY_MIN, ACTUATOR_DUTY_MAX);
+    if (sat == duty) {
         s_cmd.integral += error * ACTUATOR_CONTROL_DT_S;
     }
+    s_cmd.dutyPercent = sat;
 
     if (fabsf(error) < ACTUATOR_POSITION_TOLERANCE_CM) {
         stopMotor();

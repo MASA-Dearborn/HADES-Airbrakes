@@ -2,7 +2,7 @@
 
 from rocketpy import Environment, Rocket, SolidMotor
 
-from .cd_table import rocketpy_drag_curve
+from .cd_table import closed_brakes_drag_curve, rocketpy_drag_curve
 from .config import SimConfig
 
 
@@ -57,7 +57,7 @@ def build_rocket(cfg: SimConfig, motor: SolidMotor) -> Rocket:
         mass=r.mass,
         inertia=r.inertia,
         center_of_mass_without_motor=0,
-        power_off_drag=str(r.power_off_drag),
+        power_off_drag=closed_brakes_drag_curve(),
         power_on_drag=str(r.power_on_drag),
         coordinate_system_orientation="tail_to_nose",
     )
@@ -84,10 +84,10 @@ def build_rocket(cfg: SimConfig, motor: SolidMotor) -> Rocket:
 def add_airbrakes(rocket: Rocket, controller_function, sampling_rate: int):
     """Attach the airbrakes surface driven by `controller_function`.
 
-    The CFD table is full-vehicle Cd, so override_rocket_drag=True: whenever
-    the simulation evaluates the brakes (including deployment 0) the table
-    replaces the rocket's own drag curve.  The 0-opening column is the
-    clean-configuration Cd from the same CFD campaign, keeping the plant
+    The CFD table is full-vehicle Cd, so override_rocket_drag=True: while the
+    brakes are open the table replaces the rocket's own drag curve.  RocketPy
+    skips the brakes at deployment 0, so build_rocket() sets power_off_drag to
+    the table's 0-opening column; closed and open brakes share one aero model,
     consistent with the firmware predictor.
     """
     return rocket.add_air_brakes(

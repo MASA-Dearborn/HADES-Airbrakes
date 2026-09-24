@@ -108,7 +108,7 @@
 // State Machine
 #define SM_LAUNCH_ACCEL_THRESHOLD_MS2  30.0f     // net vertical accel to confirm launch (~3 g above gravity)
 #define SM_LAUNCH_CONFIRM_COUNT        5          // consecutive IMU samples required to latch launch
-#define SM_COAST_DELAY_US              4400000UL  // time after launch before entering COASTING (4.52 s)
+#define SM_COAST_DELAY_US              3400000UL  // time after launch before entering COASTING (4.52 s)
 #define SM_TILT_LOCK_DEG               30.0f      // max tilt angle for airbrake deployment
 
 // Guidance — rocket physical properties (must be set before flight)

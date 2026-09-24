@@ -67,7 +67,7 @@ class RocketConfig:
     radius: float = 15.7 / 200
     mass: float = 26.2                # without motor
     inertia: tuple = (4.449, 4.449, 1)
-    power_off_drag: Path = DATA_DIR / "power_off_drag.CSV"
+    # power-off (coast) drag comes from the CFD table, see cd_table.closed_brakes_drag_curve
     power_on_drag: Path = DATA_DIR / "power_on_drag.CSV"
     nose_length: float = 92.7 / 100
     nose_kind: str = "von karman"
