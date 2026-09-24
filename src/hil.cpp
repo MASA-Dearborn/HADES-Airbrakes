@@ -133,9 +133,12 @@ static bool handlePacket(uint8_t type) {
 void hilInit() {
     Serial.println("HIL: waiting for INIT from host...");
     uint32_t lastBlinkMs = 0;
+
     while (true) {
         while (Serial.available()) {
             uint8_t type = rxFeed((uint8_t)Serial.read());
+            if (type == 0) continue;
+
             if (type == HIL_PKT_INIT) {
                 handlePacket(type);
                 Serial.print("HIL: INIT ok, base pressure ");
@@ -143,7 +146,11 @@ void hilInit() {
                 Serial.println(" hPa");
                 return;
             }
+
+            Serial.print("HIL: unexpected packet type 0x");
+            Serial.println(type, HEX);
         }
+
         if (millis() - lastBlinkMs >= 250) {
             lastBlinkMs = millis();
             digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
