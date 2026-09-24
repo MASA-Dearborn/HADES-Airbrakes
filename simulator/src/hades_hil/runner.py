@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 from rocketpy import Flight
 
-from .config import RESULTS_DIR, TARGET_APOGEE_M, SimConfig
+from .config import ACT_MAX_POS_CM, RESULTS_DIR, TARGET_APOGEE_M, SimConfig
 from .controller import HilBridge, OfflineBridge
 from .hil_link import HilLink, autodetect_port
 from .sensors import SensorSimulator
@@ -138,10 +138,10 @@ def _plot_altitude(out_dir: Path, runs):
 def _plot_control(out_dir: Path, run):
     summary, log = run
     t = log.column("t")
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 11), sharex=True)
+    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 13), sharex=True)
 
     ax1.plot(t, log.column("deployment"), label="deployment level")
-    target = [p / 10.0 for p in log.column("target_pos_cm")]
+    target = [p / ACT_MAX_POS_CM for p in log.column("target_pos_cm")]
     ax1.plot(t, target, "--", alpha=0.7, label="commanded (target pos / stroke)")
     ax1.set_ylabel("deployment [0–1]")
     ax1.set_ylim(-0.05, 1.05)
@@ -151,37 +151,29 @@ def _plot_control(out_dir: Path, run):
     ax2.axhline(summary["apogee_agl_m"], color="g", ls="--", label="achieved")
     ax2.set_ylabel("apogee [m AGL]")
 
-    # Kalman covariance (left axis) + actuator duty (right axis)
-    import math
-    p00 = log.column("kf_p00")
-    p11 = log.column("kf_p11")
-    duty = log.column("act_duty_pct")
-    valid = [not math.isnan(v) for v in p00]
-    if any(valid):
-        tv = [t[i] for i in range(len(t)) if valid[i]]
-        ax3.plot(tv, [p00[i] for i in range(len(t)) if valid[i]],
-                 label="P00 (alt var)")
-        ax3.plot(tv, [p11[i] for i in range(len(t)) if valid[i]],
-                 label="P11 (vel var)")
-    ax3.set_ylabel("Kalman covariance")
-    ax3_r = ax3.twinx()
-    valid_d = [not math.isnan(v) for v in duty]
-    if any(valid_d):
-        tv_d = [t[i] for i in range(len(t)) if valid_d[i]]
-        ax3_r.plot(tv_d, [duty[i] for i in range(len(t)) if valid_d[i]],
-                   color="tab:red", alpha=0.6, label="duty %")
-    ax3_r.set_ylabel("actuator duty [%]")
-    ax3_r.set_ylim(-110, 110)
-    ax3.set_xlabel("flight time [s]")
+    def _valid(col):
+        return ([t[i] for i, v in enumerate(col) if not math.isnan(v)],
+                [v for v in col if not math.isnan(v)])
 
-    lines1, labels1 = ax3.get_legend_handles_labels()
-    lines2, labels2 = ax3_r.get_legend_handles_labels()
-    ax3.legend(lines1 + lines2, labels1 + labels2, loc="upper right")
+    # Actuator PID duty
+    td, duty = _valid(log.column("act_duty_pct"))
+    if td:
+        ax3.plot(td, duty, color="tab:red", label="duty %")
+    ax3.set_ylabel("actuator duty [%]")
+    ax3.set_ylim(-110, 110)
 
-    for ax in (ax1, ax2, ax3):
+    # Kalman covariance
+    tp, p00 = _valid(log.column("kf_p00"))
+    if tp:
+        ax4.plot(tp, p00, label="P00 (alt var)")
+        ax4.plot(*_valid(log.column("kf_p11")), label="P11 (vel var)")
+    ax4.set_ylabel("Kalman covariance")
+    ax4.set_xlabel("flight time [s]")
+
+    for ax in (ax1, ax2, ax3, ax4):
         ax.grid(alpha=0.3)
-        if ax is not ax3:
-            ax.legend()
+        if ax.get_legend_handles_labels()[0]:
+            ax.legend(loc="upper right")
     fig.tight_layout()
     fig.savefig(out_dir / "control.png", dpi=150)
     plt.close(fig)

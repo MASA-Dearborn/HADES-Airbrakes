@@ -18,7 +18,7 @@ IMU_DT_US = 1_000_000 // IMU_RATE_HZ
 BARO_EVERY_N = 4                   # BARO_PERIOD_US = 20000 -> 50 Hz
 
 ACT_MAX_POS_CM = 5.0              # ACTUATOR_MAX_POSITION_CM
-ACT_MAX_SPEED_CMS = 4.0            # HIL_ACT_MAX_SPEED_CMS
+ACT_MAX_SPEED_CMS = 0.9            # HIL_ACT_MAX_SPEED_CMS
 
 ROCKET_MASS_KG = 33.135            # ROCKET_MASS_KG (firmware predictor mass)
 ROCKET_REF_AREA_M2 = 0.01928       # ROCKET_REF_AREA_M2
@@ -31,15 +31,15 @@ RESULTS_DIR = Path(__file__).resolve().parents[2] / "results"
 
 @dataclass
 class EnvConfig:
-    latitude: float = 31.039168
-    longitude: float = -103.536997
-    elevation: float = 0.0
+    latitude: float = 43.26327778
+    longitude: float = -86.03233333
+    elevation: float = 207.953
     # "standard" needs no network.  "forecast"/"ensemble" pull GFS/GEFS from
     # NOAA NOMADS OpenDAP; "windy" pulls GFS/ECMWF/ICON from the Windy API.
     # Use "windy" when NOMADS OpenDAP is down (it returns a 1e7 Pa sentinel).
     # All non-"standard" options require internet.
     atmosphere: str = "standard"
-    date: tuple | None = (2026, 6, 17, 12)   # (Y, M, D, hour UTC) for forecast models
+    date: tuple | None = (2026, 9, 26, 12)   # (Y, M, D, hour UTC) for forecast models
     forecast_file: str = "GFS"               # windy: GFS/ECMWF/ICON/ICONEU
 
 

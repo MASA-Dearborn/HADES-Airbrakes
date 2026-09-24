@@ -48,8 +48,12 @@
 #define ACTUATOR_PWM_MIN_EXTEND 150
 #define ACTUATOR_PWM_MIN_RETRACT 150
 
-#define ACTUATOR_EXTEND_SIGN 1
-#define ACTUATOR_RETRACT_SIGN -1
+// Firmware convention: positive PWM/duty = extend, positive count = extended.
+// These map it onto the wiring.  Bench-checked: raw +PWM on IN1 retracts and
+// the Hall count falls while extending, so both are flipped.
+#define ACTUATOR_EXTEND_SIGN -1   // motor: raw IN1 drive direction that extends
+#define ACTUATOR_RETRACT_SIGN 1
+#define ACTUATOR_ENCODER_SIGN -1  // Hall count direction while extending
 
 //Actuator Settings
 #define ACTUATOR_FULL_STROKE_CM 5.0f //4.5? about
@@ -57,13 +61,13 @@
 #define ACTUATOR_CM_PER_TRANSITION \
     (ACTUATOR_FULL_STROKE_CM / ACTUATOR_TRANSITIONS_FULL_STROKE)
 
-#define ACTUATOR_MAX_POSITION_CM 10.0f
+#define ACTUATOR_MAX_POSITION_CM ACTUATOR_FULL_STROKE_CM
 #define ACTUATOR_MIN_POSITION_CM 0.0f
 
 #define ACTUATOR_POSITION_TOLERANCE_CM 0.1f
 
 //Homing
-#define ACTUATOR_HOMING_PWM 255
+#define ACTUATOR_HOMING_PWM -255  // retract (firmware convention)
 
 #define ACTUATOR_HOMING_TIMEOUT_MS 15000UL
 #define ACTUATOR_HOMING_STALL_TIME_MS 300UL
@@ -119,5 +123,5 @@
 // HIL actuator plant model (only used when built with -DHIL_MODE).
 // Match HIL_ACT_MAX_SPEED_CMS to the bench-measured no-load speed at
 // full PWM so closed-loop deployment timing is realistic.
-#define HIL_ACT_MAX_SPEED_CMS  4.0f      // cm/s at PWM 255
+#define HIL_ACT_MAX_SPEED_CMS  0.9f      // cm/s at PWM 255 (bench: 5 cm in ~5.5 s)
 #define HIL_ACT_START_POS_CM   2.0f      // physical position at boot, exercises homing

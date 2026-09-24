@@ -31,7 +31,7 @@ pio run -e teensy41-hil -t upload
 
 # Real-actuator HIL: sensors injected, but the real motor + Hall encoder are
 # in the loop (actual speed, friction, dead-band, homing). Wire the H-bridge
-# (IN1=36, IN2=37, NSLEEP=35) and encoder (Hall A=23, B=22, FAULT=14).
+# (IN1=36, IN2=37) and encoder (Hall A=34, B=35).
 pio run -e teensy41-hil-act -t upload
 ```
 

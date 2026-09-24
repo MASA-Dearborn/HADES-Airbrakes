@@ -61,10 +61,10 @@ static void updateState() {
     int sum = (s_act.lastEncoded << 2) | encoded;
 
     if (sum == 0b0010 || sum == 0b1011 || sum == 0b1101 || sum == 0b0100) {
-        s_act.positionCount++;
+        s_act.positionCount += ACTUATOR_ENCODER_SIGN;
         s_act.transitionCount++;
     } else if (sum == 0b0001 || sum == 0b0111 || sum == 0b1110 || sum == 0b1000) {
-        s_act.positionCount--;
+        s_act.positionCount -= ACTUATOR_ENCODER_SIGN;
         s_act.transitionCount++;
     }
     s_act.lastEncoded = encoded;
@@ -95,12 +95,13 @@ static void applyMotor(int pwm) {
     pwm = constrain(pwm, -ACTUATOR_PWM_MAX, ACTUATOR_PWM_MAX);
     s_cmd.pwmCmd = pwm;
 #if !defined(HIL_MODE) || defined(HIL_REAL_ACTUATOR)
-    if (pwm > 0) {
-        analogWrite(ACTUATOR_IN1_PIN, pwm);
+    int raw = pwm * ACTUATOR_EXTEND_SIGN;  // firmware +pwm = extend
+    if (raw > 0) {
+        analogWrite(ACTUATOR_IN1_PIN, raw);
         analogWrite(ACTUATOR_IN2_PIN, 0);
-    } else if (pwm < 0) {
+    } else if (raw < 0) {
         analogWrite(ACTUATOR_IN1_PIN, 0);
-        analogWrite(ACTUATOR_IN2_PIN, -pwm);
+        analogWrite(ACTUATOR_IN2_PIN, -raw);
     } else {
         analogWrite(ACTUATOR_IN1_PIN, 0);
         analogWrite(ACTUATOR_IN2_PIN, 0);
