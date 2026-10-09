@@ -45,6 +45,8 @@ pio run                                      # build HIL firmware
 pio run -e teensy41-hil -t upload            # upload safe HIL firmware
 pio run -e teensy41 -t upload                # upload real flight firmware
 pio run -e teensy41-hil-act -t upload        # simulated sensors, real actuator
+pio run -e teensy40-stepper -t upload        # Teensy 4.0 stepper motor bench test
+pio device monitor -p COM10 -b 115200        # serial monitor for the stepper test
 ```
 
 Do not use a real-actuator build until the motor and encoder are wired and the
