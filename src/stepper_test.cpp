@@ -16,7 +16,7 @@ HOW TO RUN:
 1.) pio run -e teensy40-stepper -t upload
 ^ if ur running on a teensy 4.0 and trying to test motor stepping.
 2.) pio device monitor -p COM10 -b 115200
-3.) Type a command and press Enter:
+3.) Type a command (r and s run instantly, others run on Enter or 1 s after you stop typing):
     r    = initialize the driver
     s    = print driver status and faults
     f200 = move forward 200 steps
@@ -51,6 +51,7 @@ constexpr uint8_t INIT_ATTEMPTS = 5;          // r retries this many times befor
 constexpr uint32_t INIT_RETRY_DELAY_MS = 50;  // Wait between attempts so motor power can settle
 constexpr uint32_t ENABLE_SETTLE_MS = 5;      // Let the charge pump come up before checking faults
 constexpr uint32_t HEALTH_CHECK_MS = 250;     // How often (while idle) we check the driver still has our settings
+constexpr uint32_t COMMAND_TIMEOUT_MS = 1000; // Run a typed command this long after the last key if Enter never comes
 
 // One plain-English sentence per DRV8434S fault bit (abbreviation in brackets matches the datasheet).
 struct FaultInfo { DRV8434SFaultBit bit; const char *message; };
@@ -118,25 +119,37 @@ void updateMotor(){
 
 // Build the command one character at a time so the motor keeps stepping while you type.
 // (readStringUntil used to block for up to 1 s, which froze the motor mid-move.)
+// A command is done when you press Enter, when you type r or s (no Enter needed),
+// or when you stop typing for COMMAND_TIMEOUT_MS (for monitors that never send Enter).
 bool readCommand(String &command)
 {
     static String buffer;
-    while (Serial.available())
+    static uint32_t lastCharMs = 0;
+    bool done = false;
+
+    while (!done && Serial.available())
     {
         char c = Serial.read();
-        if (c != '\n' && c != '\r')
+        lastCharMs = millis();
+        if (c == '\n' || c == '\r')
+        {
+            done = buffer.length() > 0; // Enter (blank lines and the \n of a \r\n pair are skipped)
+        }
+        else
         {
             buffer += c;
-            continue;
+            done = buffer == "r" || buffer == "s"; // Single-key commands run right away
         }
-        if (buffer.length() == 0) continue; // Skip the \n of a \r\n pair and blank lines
-
-        command = buffer;
-        buffer = "";
-        command.trim();
-        return true;
     }
-    return false;
+
+    // Some monitors never send Enter, so finish the command once you stop typing.
+    if (!done && buffer.length() > 0 && millis() - lastCharMs >= COMMAND_TIMEOUT_MS) done = true;
+    if (!done) return false;
+
+    command = buffer;
+    buffer = "";
+    command.trim();
+    return true;
 }
 
 // The DRV8434S always sends 1s in the top two bits of its status byte, so anything else means nobody answered.
