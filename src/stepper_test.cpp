@@ -16,11 +16,12 @@ HOW TO RUN:
 1.) pio run -e teensy40-stepper -t upload
 ^ if ur running on a teensy 4.0 and trying to test motor stepping.
 2.) pio device monitor -p COM10 -b 115200
-3.) Type a command (r and s run instantly, others run on Enter or 1 s after you stop typing):
-    r    = initialize the driver
-    s    = print driver status and faults
+3.) Type a command (r, s, d run instantly, others run on Enter or 1 s after you stop typing):
+    r    = start the driver
+    s    = status (is the driver ok, any faults)
     f200 = move forward 200 steps
     b200 = move backward 200 steps
+    d    = raw register dump in hex (only for deep debugging)
 */
 
 /*
@@ -47,33 +48,33 @@ constexpr uint32_t delay_start_ms = 10; // Delay before initializing the driver 
 
 // Driver init / health settings
 constexpr uint32_t DRV_SPI_HZ = 500000;       // Must match the SPI speed hardcoded in the DRV8434S library
-constexpr uint8_t INIT_ATTEMPTS = 5;          // r retries this many times before giving up
+constexpr uint8_t INIT_ATTEMPTS = 5;          // r quietly retries this many times before giving up
 constexpr uint32_t INIT_RETRY_DELAY_MS = 50;  // Wait between attempts so motor power can settle
 constexpr uint32_t ENABLE_SETTLE_MS = 5;      // Let the charge pump come up before checking faults
 constexpr uint32_t HEALTH_CHECK_MS = 250;     // How often (while idle) we check the driver still has our settings
 constexpr uint32_t COMMAND_TIMEOUT_MS = 1000; // Run a typed command this long after the last key if Enter never comes
 
-// One plain-English sentence per DRV8434S fault bit (abbreviation in brackets matches the datasheet).
+// One short line per DRV8434S fault bit.
 struct FaultInfo { DRV8434SFaultBit bit; const char *message; };
 constexpr FaultInfo FAULTS[] = {
-    {DRV8434SFaultBit::UVLO,      "Fault: motor supply (VM) is off or dropped too low (UVLO)."},
-    {DRV8434SFaultBit::CPUV,      "Fault: driver charge pump is too low, usually from a weak motor supply (CPUV)."},
-    {DRV8434SFaultBit::OCP,       "Fault: overcurrent, a motor wire may be shorted or touching another wire (OCP)."},
-    {DRV8434SFaultBit::TF,        "Fault: driver is overheating, let it cool or lower the current (TF)."},
-    {DRV8434SFaultBit::SPI_ERROR, "Fault: driver got a garbled SPI message, check SPI wiring and ground (SPI_ERROR)."},
-    {DRV8434SFaultBit::OL,        "Fault: open load, a motor coil wire is disconnected (OL)."},
-    {DRV8434SFaultBit::STL,       "Fault: motor stall detected (STL)."},
+    {DRV8434SFaultBit::UVLO,      "FAULT: Motor power is off or too low."},
+    {DRV8434SFaultBit::CPUV,      "FAULT: Motor power is too weak for the driver."},
+    {DRV8434SFaultBit::OCP,       "FAULT: Overcurrent. Check for shorted motor wires."},
+    {DRV8434SFaultBit::TF,        "FAULT: Driver is overheating."},
+    {DRV8434SFaultBit::SPI_ERROR, "FAULT: Bad SPI data. Check SPI wires and ground."},
+    {DRV8434SFaultBit::OL,        "FAULT: Motor wire disconnected."},
+    {DRV8434SFaultBit::STL,       "FAULT: Motor stalled."},
 };
 // Faults where clearing and retrying over and over could damage the driver.
 constexpr uint8_t DANGEROUS_FAULTS = (1 << (uint8_t)DRV8434SFaultBit::OCP) | (1 << (uint8_t)DRV8434SFaultBit::TF);
 
 // Printed at startup and by s, so you can tell if the board is actually running the code you just uploaded.
-constexpr const char *BUILD_STAMP = "Stepper test firmware built " __DATE__ " " __TIME__ ".";
-constexpr const char *NOT_ANSWERING = "driver is not answering on SPI, check motor power (VM), VSDO/nSLEEP, and the SPI wires.";
+constexpr const char *BUILD_STAMP = "Firmware: " __DATE__ " " __TIME__;
+constexpr const char *NO_RESPONSE = "Driver not responding. Check motor power and SPI wires.";
 
 DRV8434S driver;
 bool driverReady = false;
-const char *lastInitError = nullptr; // Why the last r failed (nullptr = never run or it worked)
+const char *lastInitError = nullptr; // Why the last start failed (nullptr = never run or it worked)
 
 uint32_t stepsRemaining = 0;
 uint32_t lastStepTime = 0;
@@ -119,7 +120,7 @@ void updateMotor(){
 
 // Build the command one character at a time so the motor keeps stepping while you type.
 // (readStringUntil used to block for up to 1 s, which froze the motor mid-move.)
-// A command is done when you press Enter, when you type r or s (no Enter needed),
+// A command is done when you press Enter, when you type a single-key command (no Enter needed),
 // or when you stop typing for COMMAND_TIMEOUT_MS (for monitors that never send Enter).
 bool readCommand(String &command)
 {
@@ -138,7 +139,7 @@ bool readCommand(String &command)
         else
         {
             buffer += c;
-            done = buffer == "r" || buffer == "s"; // Single-key commands run right away
+            done = buffer == "r" || buffer == "s" || buffer == "d"; // Single-key commands run right away
         }
     }
 
@@ -159,10 +160,10 @@ bool driverResponding()
     return (driver.driver.lastStatus & 0xC0) == 0xC0 && ctrl2 != 0xFF;
 }
 
-// Dump every driver register on one line so the raw values can be pasted when asking for help.
+// Raw hex dump of every driver register, only for deep debugging (d command).
 void printRegisters()
 {
-    Serial.printf("Registers: status=0x%02X FAULT=0x%02X DIAG1=0x%02X DIAG2=0x%02X CTRL1-7=",
+    Serial.printf("Raw: status=%02X FAULT=%02X DIAG1=%02X DIAG2=%02X CTRL1-7=",
                   driver.driver.lastStatus, driver.readFault(), driver.readDiag1(), driver.readDiag2());
     for (uint8_t reg = (uint8_t)DRV8434SRegAddr::CTRL1; reg <= (uint8_t)DRV8434SRegAddr::CTRL7; reg++)
     {
@@ -171,53 +172,46 @@ void printRegisters()
     Serial.println();
 }
 
-// Read back every control register and say which one does not match what we wrote.
+// Read back every control register and check it matches what we wrote.
 bool settingsMatch()
 {
     for (uint8_t reg = (uint8_t)DRV8434SRegAddr::CTRL1; reg <= (uint8_t)DRV8434SRegAddr::CTRL7; reg++)
     {
-        uint8_t expected = driver.getCachedReg((DRV8434SRegAddr)reg);
-        uint8_t actual = driver.driver.readReg(reg);
-        if (actual != expected)
-        {
-            Serial.printf("Register CTRL%u reads 0x%02X but should be 0x%02X.\n", reg - 2, actual, expected);
-            return false;
-        }
+        if (driver.driver.readReg(reg) != driver.getCachedReg((DRV8434SRegAddr)reg)) return false;
     }
     return true;
 }
 
-// Print each active fault as one sentence and return the fault bits that were set.
-uint8_t printFaults()
+// Fault bits we know how to explain (bit 7 only says "some fault is active").
+uint8_t activeFaults()
 {
     uint8_t faults = driver.readFault();
     uint8_t active = 0;
     for (const FaultInfo &f : FAULTS)
     {
-        uint8_t mask = 1 << (uint8_t)f.bit;
-        if (faults & mask)
-        {
-            Serial.println(f.message);
-            active |= mask;
-        }
+        active |= faults & (1 << (uint8_t)f.bit);
     }
     return active;
 }
 
-// Remember why an init attempt failed so r and s can both say it in one line.
-void initFailed(uint8_t attempt, const char *why)
+void printFaults(uint8_t faults)
 {
-    lastInitError = why;
-    Serial.printf("Attempt %u of %u failed: %s\n", attempt, INIT_ATTEMPTS, why);
+    for (const FaultInfo &f : FAULTS)
+    {
+        if (faults & (1 << (uint8_t)f.bit)) Serial.println(f.message);
+    }
 }
 
 // Write all settings, enable the outputs, and confirm the driver actually took them.
-// Retries on its own, this is what spamming r used to do by hand.
-bool configureDriver()
+// Retries quietly (this is what spamming r used to do by hand) and only prints faults once at the end.
+// Returns which attempt worked, or 0 if they all failed (reason in lastInitError).
+uint8_t configureDriver()
 {
+    uint8_t faults = 0;
     for (uint8_t attempt = 1; attempt <= INIT_ATTEMPTS; attempt++)
     {
         if (attempt > 1) delay(INIT_RETRY_DELAY_MS);
+        faults = 0;
 
         driver.resetSettings(); // Also turns the outputs off (EN_OUT = 0)
         driver.setCurrentMilliamps(MOTOR_CURRENT_MA);
@@ -228,45 +222,38 @@ bool configureDriver()
 
         if (!driverResponding())
         {
-            initFailed(attempt, NOT_ANSWERING);
+            lastInitError = NO_RESPONSE;
             continue;
         }
         if (!settingsMatch())
         {
-            initFailed(attempt, "driver did not keep the settings we wrote, SPI data is probably getting corrupted.");
+            lastInitError = "Driver settings did not stick. Check SPI wires and ground.";
             continue;
         }
 
         driver.enableDriver(); // SPI good? enable.
         delay(ENABLE_SETTLE_MS);
+        faults = activeFaults();
 
         if (!settingsMatch())
         {
-            printFaults();
-            initFailed(attempt, "driver reset right after enabling, the motor supply is probably sagging under load.");
+            lastInitError = "Driver reset when turned on. Motor power may be too weak.";
             continue;
         }
-
-        uint8_t faults = printFaults();
         if (faults == 0)
         {
-            if (attempt > 1) Serial.printf("Driver came up on attempt %u.\n", attempt);
             lastInitError = nullptr;
-            return true;
+            return attempt;
         }
 
         driver.disableDriver();
-        if (faults & DANGEROUS_FAULTS)
-        {
-            initFailed(attempt, "driver reported a fault that can damage it (see the Fault line above), so we stopped retrying.");
-            return false;
-        }
-        initFailed(attempt, "driver reported a fault after enabling (see the Fault line above).");
+        lastInitError = "Driver has a fault.";
+        if (faults & DANGEROUS_FAULTS) break; // Don't keep clearing a fault that can damage the driver
     }
 
     driver.disableDriver();
-    printRegisters();
-    return false;
+    printFaults(faults);
+    return 0;
 }
 
 // A motor supply dip (like changing the voltage) resets the DRV8434S to defaults with its outputs off.
@@ -276,11 +263,10 @@ bool ensureDriverHealthy()
     if (!driverReady) return false;
     if (settingsMatch()) return true;
 
-    Serial.println("Driver lost its settings (motor power probably dipped or changed), restoring them now.");
-    printFaults();
-    driverReady = configureDriver();
-    if (driverReady) Serial.println("Driver restored. Ready to move!");
-    else Serial.printf("Could not restore the driver: %s Fix that then enter r.\n", lastInitError);
+    Serial.println("WARN: Driver lost power. Restoring...");
+    driverReady = configureDriver() > 0;
+    if (driverReady) Serial.println("OK: Driver restored.");
+    else Serial.printf("FAIL: %s\n", lastInitError);
     return driverReady;
 }
 
@@ -288,19 +274,21 @@ bool ensureDriverHealthy()
 void printStatus()
 {
     Serial.println(BUILD_STAMP);
+    if (driverReady && !ensureDriverHealthy()) return; // It already printed what went wrong
 
-    if (!driverResponding()) Serial.printf("SPI: %s\n", NOT_ANSWERING);
-    else Serial.println("SPI: driver is answering.");
-
-    if (driverReady)
+    if (!driverResponding())
     {
-        if (settingsMatch()) Serial.println("Init: driver is initialized and its settings look correct.");
+        Serial.printf("FAIL: %s\n", NO_RESPONSE);
+        return; // Fault bits are garbage if the driver is not answering
     }
-    else if (lastInitError != nullptr) Serial.printf("Init: not initialized, last r failed because %s\n", lastInitError);
-    else Serial.println("Init: r has not been run yet.");
 
-    if (printFaults() == 0) Serial.println("Faults: none reported.");
-    printRegisters();
+    if (driverReady) Serial.println("OK: Driver ready.");
+    else if (lastInitError != nullptr) Serial.printf("FAIL: Last start failed. %s\n", lastInitError);
+    else Serial.println("Driver is responding. Press r to start it.");
+
+    uint8_t faults = activeFaults();
+    if (faults == 0) Serial.println("Faults: none");
+    else printFaults(faults);
 }
 
 
@@ -323,10 +311,9 @@ void setup()
     SPI.beginTransaction(SPISettings(DRV_SPI_HZ, MSBFIRST, SPI_MODE1));
     SPI.endTransaction();
 
-    Serial.println(BUILD_STAMP);
     Serial.println("Stepper test ready.");
-    Serial.println("Enter r to initialize the driver, or s for driver status.");
-    Serial.println("Then enter f200 or b200 to move.");
+    Serial.println(BUILD_STAMP);
+    Serial.println("Commands: r = start driver, s = status, f200 / b200 = move");
 }
 
 void loop()
@@ -353,10 +340,13 @@ void loop()
 
         // Configure after motor supply is powered
         delay(delay_start_ms);
-        Serial.println("Initializing driver...");
-        driverReady = configureDriver();
-        if (driverReady) Serial.println("Driver initialized. Ready to move!");
-        else Serial.printf("Driver init failed: %s\n", lastInitError);
+        Serial.println("Starting driver...");
+        uint8_t tries = configureDriver();
+        driverReady = tries > 0;
+
+        if (tries == 1) Serial.println("OK: Driver ready.");
+        else if (tries > 1) Serial.printf("OK: Driver ready (took %u tries).\n", tries);
+        else Serial.printf("FAIL: %s\n", lastInitError);
         return;
     }
 
@@ -366,16 +356,22 @@ void loop()
         return;
     }
 
+    if (command == "d")
+    {
+        printRegisters();
+        return;
+    }
+
     char direction = command.charAt(0);
     if (direction != 'f' && direction != 'b')
     {
-        Serial.println("Unknown command, use r, s, f<steps>, or b<steps> (example: f200).");
+        Serial.println("Unknown command. Use r, s, f200, or b200.");
         return;
     }
 
     if (!driverReady)
     {
-        Serial.println("Initialize with r first.");
+        Serial.println("Press r first to start the driver.");
         return;
     }
     if (!ensureDriverHealthy()) return;
@@ -384,11 +380,10 @@ void loop()
 
     if (steps <= 0 || steps > (long)MAX_STEPS)
     {
-        Serial.printf("Choose 1 to %lu steps (example: f200).\n", (unsigned long)MAX_STEPS);
+        Serial.printf("Steps must be 1 to %lu.\n", (unsigned long)MAX_STEPS);
         return;
     }
 
-    if (stepsRemaining > 0) Serial.println("New move received, replacing the current move.");
     Serial.printf("Moving %s %ld steps...\n", direction == 'f' ? "forward" : "backward", steps);
     moveMotor(steps, direction == 'f' ? HIGH : LOW);
 }
