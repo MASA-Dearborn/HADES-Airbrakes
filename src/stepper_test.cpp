@@ -66,8 +66,13 @@ constexpr FaultInfo FAULTS[] = {
 // Faults where clearing and retrying over and over could damage the driver.
 constexpr uint8_t DANGEROUS_FAULTS = (1 << (uint8_t)DRV8434SFaultBit::OCP) | (1 << (uint8_t)DRV8434SFaultBit::TF);
 
+// Printed at startup and by s, so you can tell if the board is actually running the code you just uploaded.
+constexpr const char *BUILD_STAMP = "Stepper test firmware built " __DATE__ " " __TIME__ ".";
+constexpr const char *NOT_ANSWERING = "driver is not answering on SPI, check motor power (VM), VSDO/nSLEEP, and the SPI wires.";
+
 DRV8434S driver;
 bool driverReady = false;
+const char *lastInitError = nullptr; // Why the last r failed (nullptr = never run or it worked)
 
 uint32_t stepsRemaining = 0;
 uint32_t lastStepTime = 0;
@@ -138,10 +143,19 @@ bool readCommand(String &command)
 bool driverResponding()
 {
     uint8_t ctrl2 = driver.driver.readReg(DRV8434SRegAddr::CTRL2);
-    if ((driver.driver.lastStatus & 0xC0) == 0xC0 && ctrl2 != 0xFF) return true;
+    return (driver.driver.lastStatus & 0xC0) == 0xC0 && ctrl2 != 0xFF;
+}
 
-    Serial.println("Driver is not answering on SPI, check motor power (VM), VSDO/nSLEEP, and the SPI wires.");
-    return false;
+// Dump every driver register on one line so the raw values can be pasted when asking for help.
+void printRegisters()
+{
+    Serial.printf("Registers: status=0x%02X FAULT=0x%02X DIAG1=0x%02X DIAG2=0x%02X CTRL1-7=",
+                  driver.driver.lastStatus, driver.readFault(), driver.readDiag1(), driver.readDiag2());
+    for (uint8_t reg = (uint8_t)DRV8434SRegAddr::CTRL1; reg <= (uint8_t)DRV8434SRegAddr::CTRL7; reg++)
+    {
+        Serial.printf("%02X ", driver.driver.readReg(reg));
+    }
+    Serial.println();
 }
 
 // Read back every control register and say which one does not match what we wrote.
@@ -177,17 +191,20 @@ uint8_t printFaults()
     return active;
 }
 
+// Remember why an init attempt failed so r and s can both say it in one line.
+void initFailed(uint8_t attempt, const char *why)
+{
+    lastInitError = why;
+    Serial.printf("Attempt %u of %u failed: %s\n", attempt, INIT_ATTEMPTS, why);
+}
+
 // Write all settings, enable the outputs, and confirm the driver actually took them.
 // Retries on its own, this is what spamming r used to do by hand.
 bool configureDriver()
 {
     for (uint8_t attempt = 1; attempt <= INIT_ATTEMPTS; attempt++)
     {
-        if (attempt > 1)
-        {
-            Serial.printf("Retrying driver init (attempt %u of %u).\n", attempt, INIT_ATTEMPTS);
-            delay(INIT_RETRY_DELAY_MS);
-        }
+        if (attempt > 1) delay(INIT_RETRY_DELAY_MS);
 
         driver.resetSettings(); // Also turns the outputs off (EN_OUT = 0)
         driver.setCurrentMilliamps(MOTOR_CURRENT_MA);
@@ -196,10 +213,14 @@ bool configureDriver()
         driver.disableSPIDirection();
         driver.clearFaults();
 
-        if (!driverResponding()) continue;
+        if (!driverResponding())
+        {
+            initFailed(attempt, NOT_ANSWERING);
+            continue;
+        }
         if (!settingsMatch())
         {
-            Serial.println("Driver did not keep the settings we wrote, SPI data is probably getting corrupted.");
+            initFailed(attempt, "driver did not keep the settings we wrote, SPI data is probably getting corrupted.");
             continue;
         }
 
@@ -208,8 +229,8 @@ bool configureDriver()
 
         if (!settingsMatch())
         {
-            Serial.println("Driver reset right after enabling, the motor supply is probably sagging under load.");
             printFaults();
+            initFailed(attempt, "driver reset right after enabling, the motor supply is probably sagging under load.");
             continue;
         }
 
@@ -217,18 +238,21 @@ bool configureDriver()
         if (faults == 0)
         {
             if (attempt > 1) Serial.printf("Driver came up on attempt %u.\n", attempt);
+            lastInitError = nullptr;
             return true;
         }
 
         driver.disableDriver();
         if (faults & DANGEROUS_FAULTS)
         {
-            Serial.println("Not retrying because this fault can damage the driver, fix it then enter r.");
+            initFailed(attempt, "driver reported a fault that can damage it (see the Fault line above), so we stopped retrying.");
             return false;
         }
+        initFailed(attempt, "driver reported a fault after enabling (see the Fault line above).");
     }
 
     driver.disableDriver();
+    printRegisters();
     return false;
 }
 
@@ -242,18 +266,28 @@ bool ensureDriverHealthy()
     Serial.println("Driver lost its settings (motor power probably dipped or changed), restoring them now.");
     printFaults();
     driverReady = configureDriver();
-    Serial.println(driverReady ? "Driver restored. Ready to move!" : "Could not restore the driver, fix the problem above then enter r.");
+    if (driverReady) Serial.println("Driver restored. Ready to move!");
+    else Serial.printf("Could not restore the driver: %s Fix that then enter r.\n", lastInitError);
     return driverReady;
 }
 
+// Works before r too, so you can check wiring and power first.
 void printStatus()
 {
-    if (!driverResponding()) return;
+    Serial.println(BUILD_STAMP);
 
-    if (!driverReady) Serial.println("Driver is answering on SPI but not initialized yet, enter r.");
-    else if (settingsMatch()) Serial.println("Driver is initialized and its settings look correct.");
+    if (!driverResponding()) Serial.printf("SPI: %s\n", NOT_ANSWERING);
+    else Serial.println("SPI: driver is answering.");
 
-    if (printFaults() == 0) Serial.println("Driver reports no faults.");
+    if (driverReady)
+    {
+        if (settingsMatch()) Serial.println("Init: driver is initialized and its settings look correct.");
+    }
+    else if (lastInitError != nullptr) Serial.printf("Init: not initialized, last r failed because %s\n", lastInitError);
+    else Serial.println("Init: r has not been run yet.");
+
+    if (printFaults() == 0) Serial.println("Faults: none reported.");
+    printRegisters();
 }
 
 
@@ -276,6 +310,7 @@ void setup()
     SPI.beginTransaction(SPISettings(DRV_SPI_HZ, MSBFIRST, SPI_MODE1));
     SPI.endTransaction();
 
+    Serial.println(BUILD_STAMP);
     Serial.println("Stepper test ready.");
     Serial.println("Enter r to initialize the driver, or s for driver status.");
     Serial.println("Then enter f200 or b200 to move.");
@@ -307,7 +342,8 @@ void loop()
         delay(delay_start_ms);
         Serial.println("Initializing driver...");
         driverReady = configureDriver();
-        Serial.println(driverReady ? "Driver initialized. Ready to move!" : "Driver init failed, see the messages above for why.");
+        if (driverReady) Serial.println("Driver initialized. Ready to move!");
+        else Serial.printf("Driver init failed: %s\n", lastInitError);
         return;
     }
 
